@@ -21,10 +21,12 @@
 
 ## 📦 インストール
 
-1. [Releases](https://github.com/kotorinChunChun/ChuwitchWindow/releases) から最新の `.exe` をダウンロード
-2. 任意のフォルダに配置して実行
+1. [Releases](https://github.com/KotorinChunChun/ChuwitchWindow/releases) のAssetsから最新の `.zip` をダウンロード
+2. 任意のフォルダに配置して解凍して `setup.exe` を実行
 
 設定は `%APPDATA%\com.kotorichun\chuwitchwindow\config.json` に自動保存されます。
+
+プログラムはインストールされるため、設定からアンインストールが可能です。
 
 ## 🚀 使い方
 
@@ -134,4 +136,4 @@ MIT License
 
 ## 👤 作者
 
-**ことりちゅん** ([@kotorinChunChun](https://github.com/kotorinChunChun))
+**ことりちゅん** ([@KotorinChunChun](https://github.com/KotorinChunChun))

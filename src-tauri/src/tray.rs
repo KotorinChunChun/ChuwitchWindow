@@ -5,7 +5,7 @@ use tauri::{
 };
 
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let settings_i = MenuItem::with_id(app, "settings", "設定（プレビュー）", true, None::<&str>)?;
+    let settings_i = MenuItem::with_id(app, "settings", "設定（ダブルクリックで表示）", true, None::<&str>)?;
     let restart_i = MenuItem::with_id(app, "restart", "再起動", true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app, "quit", "終了", true, None::<&str>)?;
 

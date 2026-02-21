@@ -97,6 +97,15 @@ pub fn run() {
             hotplug::start_hotplug_listener(app.handle().clone());
             hotkey::init(app.handle().clone());
             let _ = tray::setup_tray(app.handle());
+
+            // 引数に --autostart が含まれていない場合のみウィンドウを表示（GUIからの通常起動）
+            let args: Vec<String> = std::env::args().collect();
+            if !args.contains(&"--autostart".to_string()) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show().unwrap_or(());
+                    let _ = window.set_focus().unwrap_or(());
+                }
+            }
             Ok(())
         })
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -104,12 +113,14 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.unminimize();
+                let _ = window.set_always_on_top(true);
+                let _ = window.set_always_on_top(false);
                 let _ = window.set_focus();
             }
         }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![]),
+            Some(vec!["--autostart"]),
         ))
         .invoke_handler(tauri::generate_handler![
             greet,

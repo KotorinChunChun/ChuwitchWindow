@@ -131,7 +131,7 @@ function MainApp() {
     const handleOpenGithub = async (e: React.MouseEvent) => {
         e.preventDefault();
         try {
-            await invoke("open_url", { url: "https://github.com/kotorinChunChun/ChuwitchWindow" });
+            await invoke("open_url", { url: "https://github.com/KotorinChunChun/ChuwitchWindow" });
         } catch (error) {
             console.error("Failed to open URL:", error);
         }
@@ -211,11 +211,11 @@ function MainApp() {
                                     <div className="flex justify-between items-center text-sm">
                                         <span className="text-slate-400">GitHub</span>
                                         <a
-                                            href="https://github.com/kotorinChunChun/ChuwitchWindow"
+                                            href="https://github.com/KotorinChunChun/ChuwitchWindow"
                                             onClick={handleOpenGithub}
                                             className="text-blue-400 hover:text-blue-300 transition-colors"
                                         >
-                                            https://github.com/kotorinChunChun/ChuwitchWindow
+                                            https://github.com/KotorinChunChun/ChuwitchWindow
                                         </a>
                                     </div>
                                 </div>
