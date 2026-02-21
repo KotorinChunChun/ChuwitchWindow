@@ -1,0 +1,46 @@
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+
+# Build outputs
+dist/
+src-tauri/target/
+
+# Tauri
+src-tauri/gen/
+src-tauri/binaries/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Error Log
+src-tauri/error.txt
+src-tauri/test_output.txt
+src-tauri/err.txt
+
+# Application Specific
+data/
+src-tauri/icons/
+src-tauri/tauri.conf.json
+
+メモ.md
+要求仕様書.md
+build_error.log
+src-tauri/build_error_monitor.txt
+build_test/

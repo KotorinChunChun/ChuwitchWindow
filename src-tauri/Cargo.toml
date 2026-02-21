@@ -1,0 +1,28 @@
+[package]
+name = "chuwitchwindow"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.0.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0.0", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tauri-plugin-single-instance = "2.0.0"
+tauri-plugin-autostart = "2.0.0"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+tracing-appender = "0.2.4"
+directories = "6.0.0"
+global-hotkey = "0.7.0"
+
+[dependencies.windows]
+version = "0.52.0"
+features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_HiDpi", "Win32_Graphics_Dwm", "Win32_Security", "Win32_System_Threading", "Win32_Devices_Display"]
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
