@@ -7,15 +7,17 @@
 
 ## プロジェクト概要
 
-本書では、基本的な操作説明のみを行っています。
-
-本プロジェクトは、以下の工程でAIと協力して開発を行いました。
+本プロジェクトは、AIと協力して以下の工程で開発を行いました。
 
 1. 開発に至った背景 : [BACK.md](docs/BACK.md)
 2. 要件定義仕様書 : [SPEC.md](docs/SPEC.md)
 3. AIコーディング : [DEV.md](docs/DEV.md)
 
+本書では、基本的な操作説明のみを行います。
+
 ## ✨ 主な機能
+
+<img width="2752" alt="ChuwitchWindow概要" src="https://github.com/user-attachments/assets/af15de34-ed7a-493b-a53b-c9f78a6c2f4a" />
 
 | 機能 | 説明 | デフォルトキー |
 |------|------|---------------|
@@ -34,15 +36,15 @@
 
 アプリの一覧へインストールしたくない方／できない方のために、EXEのZIP版とインストール版を用意しています。
 
-軽く試してみたい方
-1. [Releases](https://github.com/KotorinChunChun/ChuwitchWindow/releases) のAssetsから最新の `.zip` をダウンロード
-2. ZIPを解凍して `ChuwitchWindow.exe` ファイルを直接実行
+### 軽く試してみたい方
+1. [Releases](https://github.com/KotorinChunChun/ChuwitchWindow/releases) のAssetsから `*.zip` をダウンロード
+2. `*.zip` を解凍して `ChuwitchWindow.exe` ファイルを直接実行
 
-インストールしたい方（スタートアップに登録したい方はこちらを推奨）
-1. [Releases](https://github.com/KotorinChunChun/ChuwitchWindow/releases) のAssetsから `.setup.exe` をダウンロード
-2. `.setup.exe` を実行してインストール
+### 本格的に利用したい方（スタートアップに登録したい方はこちらを推奨）
+1. [Releases](https://github.com/KotorinChunChun/ChuwitchWindow/releases) のAssetsから `*.setup.exe` をダウンロード
+2. `*.setup.exe` を実行してインストール
     - スタートメニューやデスクトップにショートカットが作成されます。
-    - 設定の【インストールされているアプリ】からアンインストールが可能です。
+    - Windowsの【設定】の【アプリ】の【インストールされているアプリ】からアンインストールが可能です。
 
 ## 🚀 使い方
 
@@ -61,6 +63,8 @@
 | 右クリック → 再起動 | アプリを再起動 |
 | 右クリック → 終了 | アプリを終了 |
 
+![](https://private-user-images.githubusercontent.com/55196383/553078983-6410993e-9b87-4cf7-861e-b31b97f33570.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzE3NjMzODAsIm5iZiI6MTc3MTc2MzA4MCwicGF0aCI6Ii81NTE5NjM4My81NTMwNzg5ODMtNjQxMDk5M2UtOWI4Ny00Y2Y3LTg2MWUtYjMxYjk3ZjMzNTcwLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMjIlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjIyVDEyMjQ0MFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPThiZTAwNmM3ZGM2M2IzZTUyYzZlYjBkNjM2MjdjZWRmMDI2NzQyN2I0YTQyNWExOWFmN2FhNDM3YThkMjc0NGMmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.xE86VVABk3cmajwNMk26Cd-zJnEVcYJlmEfPCW4y2qI)
+
 ### ウィンドウの動作
 
 - **閉じる（×ボタン）** → タスクトレイに格納（アプリは終了しません）
@@ -75,6 +79,23 @@
 - **アプリについて**: バージョン情報、GitHubリンク、設定のリセット機能があります。
 
 設定は `%APPDATA%\com.kotorichun\chuwitchwindow\config.json` に自動保存されます。
+
+### モニタ構成
+
+- プライマリモニターを選択できます。（プライマリモニタは、任意のモニタと交換できるようになります）
+- モニタにグループ色を設定できます。（同じ色のモニター間でウィンドウを一斉交換できるようになります）
+- 順位を設定できます。（巡回シフトの順番を変更できます）
+
+![](https://private-user-images.githubusercontent.com/55196383/553030517-cbf31a7a-6e69-4069-9ece-7535cc373c4b.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzE3NjMzODAsIm5iZiI6MTc3MTc2MzA4MCwicGF0aCI6Ii81NTE5NjM4My81NTMwMzA1MTctY2JmMzFhN2EtNmU2OS00MDY5LTllY2UtNzUzNWNjMzczYzRiLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMjIlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjIyVDEyMjQ0MFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTllODkxMzcyM2JmZjgwNjExZTliMzZiM2VmYmJlM2E2YmFjMGJlYThkYmRjZDFjMTIyMzFjMGRlMmIxZTA1OWImWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.hFUvWM8MP2AJQiPupVOlqtLIn2K970LOSHQ7cL5m-po)
+
+### 設定・常駐
+
+- 自動起動の登録ができます。
+- ショートカットキーの設定ができます。
+- グループ内での入れ替えを行うかモード切替ができます。
+- フルクリーンアプリの扱いを変更できます。
+
+![](https://private-user-images.githubusercontent.com/55196383/553030503-3193eb73-6f15-4cf4-8a7e-34a94d00571a.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzE3NjMzODAsIm5iZiI6MTc3MTc2MzA4MCwicGF0aCI6Ii81NTE5NjM4My81NTMwMzA1MDMtMzE5M2ViNzMtNmYxNS00Y2Y0LThhN2UtMzRhOTRkMDA1NzFhLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMjIlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjIyVDEyMjQ0MFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWFlMjQ1M2E4NzU0ZjkxMjAwMDE2OGM1ZDMwZDU2NmM1YjBlNWNhZDg2NjZkMTZlMDRiYWNmMGZmYTY5ZDRkMGEmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.c3UaAfmygZkI9oXZvHI-M5OhtbiElO72KS3M3mrNlXA)
 
 ### 🛡️ 管理者権限について
 
