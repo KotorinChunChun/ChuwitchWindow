@@ -75,7 +75,7 @@ export function SettingsPanel({
                             onChange={(v) => updateConfig({ undo_hotkey: v })}
                         />
                         <HotkeyInput
-                            label="指定画面との入れ替え (代表例として2を押して確定)"
+                            label="指定画面をプライマリデスクトップと入れ替え"
                             value={config.swap_target_modifiers ? `${config.swap_target_modifiers}+2` : ""}
                             onChange={(v) => {
                                 // Extract modifiers only, discarding the last key
@@ -106,8 +106,8 @@ export function SettingsPanel({
                             onChange={(v) => updateConfig({ swap_within_groups: v })}
                         />
                         <ToggleOption
-                            label="フルスクリーンアプリを除外"
-                            description="ゲームなどのフルスクリーンアプリは移動対象から外します"
+                            label="フルスクリーンウィンドウを除外"
+                            description="ゲームなどのフルスクリーンウィンドウは移動対象から外します"
                             checked={config.ignore_fullscreen}
                             onChange={(v) => updateConfig({ ignore_fullscreen: v })}
                         />

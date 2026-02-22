@@ -14,6 +14,7 @@ yarn-error.log*
 # Build outputs
 dist/
 src-tauri/target/
+build_verbose.log
 
 # Tauri
 src-tauri/gen/
@@ -40,7 +41,6 @@ src-tauri/icons/
 src-tauri/tauri.conf.json
 
 メモ.md
-要求仕様書.md
 build_error.log
 src-tauri/build_error_monitor.txt
 build_test/

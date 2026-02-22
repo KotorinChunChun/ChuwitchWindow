@@ -11,6 +11,34 @@ pub mod window;
 
 use tauri::{AppHandle, Manager};
 
+pub fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_always_on_top(false);
+        let _ = window.set_focus();
+    } else {
+        // ウィンドウが存在しなければ再生成
+        if let Ok(builder) = tauri::WebviewWindowBuilder::new(
+            app,
+            "main",
+            tauri::WebviewUrl::App("index.html".into())
+        )
+        .title("ChuwitchWindow 設定")
+        .inner_size(800.0, 600.0)
+        .resizable(true)
+        .visible(true)
+        .build() {
+            let _ = builder.set_always_on_top(true);
+            let _ = builder.set_always_on_top(false);
+            let _ = builder.set_focus();
+            // maximizedはビルド後に適用させる必要がある場合があるため
+            let _ = builder.maximize();
+        }
+    }
+}
+
 #[tauri::command]
 fn open_url(url: String) {
     // WindowsでURLを開く標準的な方法 (startコマンド)
@@ -101,22 +129,18 @@ pub fn run() {
             // 引数に --autostart が含まれていない場合のみウィンドウを表示（GUIからの通常起動）
             let args: Vec<String> = std::env::args().collect();
             if !args.contains(&"--autostart".to_string()) {
+                crate::show_main_window(app.handle());
+            } else {
+                // 自動起動時はメインウィンドウを破棄してメモリ削減
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show().unwrap_or(());
-                    let _ = window.set_focus().unwrap_or(());
+                    let _ = window.close();
                 }
             }
             Ok(())
         })
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 二重起動時は既存のメインウィンドウを表示してフォーカス
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_always_on_top(true);
-                let _ = window.set_always_on_top(false);
-                let _ = window.set_focus();
-            }
+            crate::show_main_window(app);
         }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -138,22 +162,25 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             match event {
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    if window.label() == "main" {
-                        api.prevent_close();
-                        let _ = window.hide();
-                    }
+                tauri::WindowEvent::CloseRequested { .. } => {
+                    // 何もしなければそのままWindowがClose（破棄）される
                 }
                 tauri::WindowEvent::Resized(_) => {
                     if window.label() == "main" {
                         if window.is_minimized().unwrap_or(false) {
-                            let _ = window.hide();
+                            let _ = window.close(); // 最小化時に破棄
                         }
                     }
                 }
                 _ => {}
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| match event {
+            tauri::RunEvent::ExitRequested { api, .. } => {
+                api.prevent_exit();
+            }
+            _ => {}
+        });
 }

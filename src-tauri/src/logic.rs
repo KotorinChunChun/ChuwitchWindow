@@ -4,7 +4,7 @@ use crate::{
     window::{get_target_windows, move_windows, WindowInfo},
 };
 use std::collections::HashMap;
-use tauri::{Manager, Emitter};
+use tauri::Manager;
 
 // --- Pure Logic for Testing ---
 pub fn group_windows_by_monitor(
@@ -62,7 +62,7 @@ pub fn handle_rotate(app: &tauri::AppHandle, clockwise: bool) {
         }
     });
     
-    let windows = get_target_windows();
+    let windows = get_target_windows(config.ignore_fullscreen);
     if windows.is_empty() {
         return;
     }
@@ -126,8 +126,6 @@ pub fn handle_rotate(app: &tauri::AppHandle, clockwise: bool) {
             move_windows(wins, &monitors[i], &monitors[next_i]);
         }
     }
-    
-    let _ = app.emit("osd-notify", if clockwise { "順方向に入れ替えました" } else { "逆方向に入れ替えました" });
 }
 
 pub fn handle_undo(app: &tauri::AppHandle) {
@@ -154,9 +152,6 @@ pub fn handle_undo(app: &tauri::AppHandle) {
                 );
             }
         }
-        let _ = app.emit("osd-notify", "元に戻しました");
-    } else {
-        let _ = app.emit("osd-notify", "履歴がありません");
     }
 }
 
@@ -195,7 +190,7 @@ pub fn handle_swap_target(app: &tauri::AppHandle, target_num: u32) {
         return; // same monitor
     }
 
-    let windows = get_target_windows();
+    let windows = get_target_windows(config.ignore_fullscreen);
     if windows.is_empty() {
         return;
     }
@@ -223,12 +218,6 @@ pub fn handle_swap_target(app: &tauri::AppHandle, target_num: u32) {
     }
     if !target_wins.is_empty() {
         move_windows(target_wins, &monitors[target_idx], &monitors[primary_idx]);
-        swapped_any = true;
-    }
-
-    if swapped_any {
-        let msg = format!("メイン ⇄ 画面 {}", target_num);
-        let _ = app.emit("osd-notify", msg);
     }
 }
 

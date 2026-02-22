@@ -11,7 +11,7 @@ use windows::Win32::UI::Shell::{IVirtualDesktopManager, VirtualDesktopManager};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetAncestor, GetLastActivePopup, GetWindowPlacement, GetWindowRect,
     GetWindowTextLengthW, GetWindowTextW, IsWindowVisible, WINDOWPLACEMENT, GA_ROOTOWNER,
-    SW_SHOWMAXIMIZED, SW_SHOWMINIMIZED,
+    SW_SHOWMAXIMIZED, SW_SHOWMINIMIZED, GetWindowLongW, GWL_STYLE, WS_CAPTION, WS_THICKFRAME,
 };
 
 use crate::monitor::MonitorRect;
@@ -31,9 +31,10 @@ struct EnumState {
     windows: Vec<WindowInfo>,
     vdm: Option<IVirtualDesktopManager>,
     monitors: Vec<crate::monitor::MonitorInfo>,
+    ignore_fullscreen: bool,
 }
 
-pub fn get_target_windows() -> Vec<WindowInfo> {
+pub fn get_target_windows(ignore_fullscreen: bool) -> Vec<WindowInfo> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
     }
@@ -45,6 +46,7 @@ pub fn get_target_windows() -> Vec<WindowInfo> {
         windows: Vec::new(),
         vdm,
         monitors: crate::monitor::get_all_monitors(),
+        ignore_fullscreen,
     });
 
     unsafe {
@@ -143,12 +145,21 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let is_maximized = placement.showCmd == SW_SHOWMAXIMIZED.0 as u32;
     let is_minimized = placement.showCmd == SW_SHOWMINIMIZED.0 as u32;
 
+    let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
+    let has_caption = (style & WS_CAPTION.0) == WS_CAPTION.0;
+    let has_thickframe = (style & WS_THICKFRAME.0) == WS_THICKFRAME.0;
+
     let is_fullscreen = state.monitors.iter().any(|m| {
-        rect.left == m.monitor_area.left
-            && rect.top == m.monitor_area.top
-            && rect.right == m.monitor_area.right
-            && rect.bottom == m.monitor_area.bottom
-    });
+        // ウィンドウの領域がモニター全画面領域と等しい、またはそれより大きい
+        rect.left <= m.monitor_area.left
+            && rect.top <= m.monitor_area.top
+            && rect.right >= m.monitor_area.right
+            && rect.bottom >= m.monitor_area.bottom
+    }) && (!has_caption && !has_thickframe);
+
+    if state.ignore_fullscreen && is_fullscreen {
+        return BOOL(1);
+    }
 
     state.windows.push(WindowInfo {
         hwnd: hwnd.0 as isize,
@@ -210,15 +221,15 @@ fn apply_snap_correction(
 }
 
 pub fn move_window(
-    hwnd: isize,
-    window_rect: &MonitorRect,
+    win: &WindowInfo,
     src_monitor: &crate::monitor::MonitorInfo,
     dest_monitor: &crate::monitor::MonitorInfo,
     hwnd_insert_after: isize,
 ) {
-    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, HWND_TOP};
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, ShowWindow, SWP_NOACTIVATE, HWND_TOP, SW_RESTORE, SW_MAXIMIZE};
 
-    let hwnd = HWND(hwnd);
+    let hwnd = HWND(win.hwnd);
+    let window_rect = &win.rect;
     
     let (new_x, new_y, new_w, new_h) = if let Some(snap) = apply_snap_correction(window_rect, &src_monitor.work_area, &dest_monitor.work_area) {
         snap
@@ -250,6 +261,10 @@ pub fn move_window(
             HWND(hwnd_insert_after)
         };
         
+        if win.is_maximized {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+
         let _ = SetWindowPos(
             hwnd,
             insert_after,
@@ -259,6 +274,10 @@ pub fn move_window(
             new_h,
             SWP_NOACTIVATE,
         );
+
+        if win.is_maximized {
+            let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+        }
     }
 }
 
@@ -266,6 +285,6 @@ pub fn move_windows(windows_to_move: &[WindowInfo], src_monitor: &crate::monitor
     // windows_to_move is sorted top to bottom (Z-order).
     // By processing bottom to top and placing them at HWND_TOP, their relative Z-order on the new monitor is perfectly restored.
     for win in windows_to_move.iter().rev() {
-        move_window(win.hwnd, &win.rect, src_monitor, dest_monitor, 0); // 0 corresponds to HWND_TOP
+        move_window(win, src_monitor, dest_monitor, 0); // 0 corresponds to HWND_TOP
     }
 }

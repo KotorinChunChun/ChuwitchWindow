@@ -1,80 +1,15 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
-import { motion, AnimatePresence } from "framer-motion";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { MonitorMap } from "@/components/MonitorMap";
 import { SettingsPanel } from "@/components/SettingsPanel";
-import { LayoutGrid, Settings, Info, MonitorPlay } from "lucide-react";
+import { LayoutGrid, Settings, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AppConfig, MonitorInfo } from "@/types";
 
 function App() {
-    const [windowLabel, setWindowLabel] = useState<string | null>(null);
-
-    useEffect(() => {
-        const appWindow = getCurrentWindow();
-        setWindowLabel(appWindow.label);
-
-        if (appWindow.label === "osd") {
-            appWindow.setIgnoreCursorEvents(true).catch(console.error);
-        }
-    }, []);
-
-    if (windowLabel === "osd") {
-        return <OsdApp />;
-    }
-
-    if (windowLabel === "main") {
-        return <MainApp />;
-    }
-
-    return null;
-}
-
-function OsdApp() {
-    const [message, setMessage] = useState<string | null>(null);
-
-    useEffect(() => {
-        let timeout: NodeJS.Timeout;
-        const unlisten = listen<string>("osd-notify", (event) => {
-            setMessage(event.payload);
-            const appWindow = getCurrentWindow();
-            appWindow.show().catch(console.error);
-
-            clearTimeout(timeout);
-            timeout = setTimeout(() => {
-                setMessage(null);
-                setTimeout(() => appWindow.hide().catch(console.error), 500);
-            }, 2000);
-        });
-
-        return () => {
-            unlisten.then(f => f());
-            clearTimeout(timeout);
-        };
-    }, []);
-
-    return (
-        <div className="w-full h-full flex items-center justify-center p-4 bg-transparent overflow-hidden">
-            <AnimatePresence>
-                {message && (
-                    <motion.div
-                        initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.95, y: -10 }}
-                        transition={{ type: "spring", stiffness: 300, damping: 25 }}
-                        className="flex items-center px-8 py-5 bg-slate-900/80 backdrop-blur-xl border border-slate-700/50 shadow-2xl rounded-2xl"
-                    >
-                        <MonitorPlay className="w-8 h-8 text-blue-400 mr-4" />
-                        <span className="text-2xl font-bold bg-gradient-to-r from-blue-300 to-cyan-300 bg-clip-text text-transparent tracking-widest drop-shadow-sm">
-                            {message}
-                        </span>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </div>
-    );
+    return <MainApp />;
 }
 
 function MainApp() {
@@ -101,6 +36,19 @@ function MainApp() {
             }
         }
         loadData();
+
+        const unlistenPromise = listen("display-changed", async () => {
+            try {
+                const loadedMonitors: MonitorInfo[] = await invoke("get_all_monitors_cmd");
+                setMonitors(loadedMonitors);
+            } catch (error) {
+                console.error("Failed to reload monitors:", error);
+            }
+        });
+
+        return () => {
+            unlistenPromise.then(f => f());
+        };
     }, []);
 
     const handleConfigChange = async (newConfig: AppConfig) => {
@@ -193,7 +141,7 @@ function MainApp() {
                         <div className="h-full flex flex-col space-y-6">
                             <div>
                                 <h2 className="text-2xl font-semibold text-white">ChuwitchWindow</h2>
-                                <p className="text-slate-400 mt-1">Version 0.1.0 (2026.02.21)</p>
+                                <p className="text-slate-400 mt-1">Version 0.1.1 (2026.02.22)</p>
                             </div>
                             <div className="rounded-2xl bg-slate-900/40 border border-slate-800 backdrop-blur-sm p-6 text-sm text-slate-300 space-y-4">
                                 <div>

@@ -45,15 +45,16 @@ else {
 # インストーラー (NSIS)
 # Tauri v2 のデフォルト出力先: src-tauri/target/release/bundle/nsis/ChuwitchWindow_<version>_x64-setup.exe
 $installerPath = "src-tauri/target/release/bundle/nsis/ChuwitchWindow_$($version)_x64-setup.exe"
+$setupDestPath = "release/ChuwitchWindow_v$($version)_Setup.exe"
 if (Test-Path $installerPath) {
-    Copy-Item $installerPath "$releaseDir/ChuwitchWindow_v$($version)_Setup.exe"
+    Copy-Item $installerPath $setupDestPath
 }
 else {
     # フォルダを探索して最新のインストーラーを探す
     $searchPattern = "src-tauri/target/release/bundle/nsis/*.exe"
     $foundInstaller = Get-ChildItem -Path $searchPattern | Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($foundInstaller) {
-        Copy-Item $foundInstaller.FullName "$releaseDir/ChuwitchWindow_v$($version)_Setup.exe"
+        Copy-Item $foundInstaller.FullName $setupDestPath
     }
     else {
         Write-Warning "インストーラーが見つかりません: $installerPath"
@@ -65,10 +66,16 @@ if (Test-Path "README.md") {
     Copy-Item "README.md" "$releaseDir/README.md"
 }
 
+
 # 5. ZIP 圧縮
 Write-Host "Compressing to ZIP..." -ForegroundColor Yellow
 if (Test-Path $zipFile) { Remove-Item $zipFile }
 Compress-Archive -Path "$releaseDir/*" -DestinationPath $zipFile
+
+# ZIP作成後、一時フォルダを削除
+if (Test-Path $releaseDir) {
+    Remove-Item -Recurse -Force $releaseDir
+}
 
 Write-Host "Release package created at: $zipFile" -ForegroundColor Green
 
@@ -78,7 +85,7 @@ if ($ghAvailable) {
     Write-Host "Checking GitHub CLI and creating release..." -ForegroundColor Cyan
     # タグが存在するか確認、なければ作成
     $tagName = "v$version"
-    gh release create $tagName $zipFile --title "Release $tagName" --notes "Automated release for $tagName" --overwrite
+    gh release create $tagName $zipFile $setupDestPath --title "Release $tagName" --notes "Automated release for $tagName" --overwrite
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Successfully created GitHub release: $tagName" -ForegroundColor Green
     }
