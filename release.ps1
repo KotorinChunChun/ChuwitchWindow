@@ -16,6 +16,13 @@ $zipFile = "release/$releaseName.zip"
 
 Write-Host "Releasing $releaseName ..." -ForegroundColor Cyan
 
+# バージョンを確認してから続行するか問い合わせる
+$confirm = Read-Host "バージョン v$version でリリースを開始します。続行しますか？ (y/N)"
+if ($confirm -notmatch '^[Yy]$') {
+    Write-Host "キャンセルしました。" -ForegroundColor Gray
+    exit 0
+}
+
 # 2. Tauri ビルドの実行 (NSIS インストーラーを含む)
 Write-Host "Building Tauri app..." -ForegroundColor Yellow
 npm run tauri build -- --bundles nsis
