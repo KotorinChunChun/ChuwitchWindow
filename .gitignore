@@ -45,3 +45,4 @@ build_error.log
 src-tauri/build_error_monitor.txt
 build_test/
 release/
+*.pptx

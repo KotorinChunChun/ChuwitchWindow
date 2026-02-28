@@ -8,7 +8,7 @@
 その結果、設定画面を開いたときにWebView2が起動するため起動が遅く、消費メモリが250MBほどに増大してしまいました。
 しかし、スタートアップ起動時に設定画面を出さないようにしたり、閉じたら解放されるようにしたりすることで、この問題は回避しています。
 
-詳しい仕様は [SPEC.md](SPEC.md) を参照してください。
+詳しい仕様は [SPECv0.1.md](SPECv0.1.md) および [SPECv0.2.md](SPECv0.2.md) を参照してください。
 
 ## 🔧 ビルド方法
 
@@ -38,7 +38,8 @@ npm run tauri build
 ```
 ├── docs/                   # プロジェクトのドキュメント類
 │   ├── BACK.md             # 開発に至った背景
-│   └── SPEC.md             # ツールの仕様書
+│   ├── SPECv0.1.md           # ツールの基本仕様書
+│   ├── SPECv0.2.md           # 次期アップデート(v0.2)仕様書
 │   ├── DEV.md              # 開発者向けドキュメント
 ├── src/                    # フロントエンド (React + TypeScript)
 │   ├── App.tsx             # メインアプリケーション
@@ -69,20 +70,20 @@ npm run tauri build
 
 ## 📝 技術スタック
 
-| レイヤー | 技術 |
-|---------|------|
-| フレームワーク | [Tauri 2](https://tauri.app/) |
-| フロントエンド | React 18 + TypeScript |
-| スタイリング | [Tailwind CSS v4](https://tailwindcss.com/) |
-| アニメーション | [Framer Motion](https://motion.dev/) |
-| アイコン | [Lucide React](https://lucide.dev/) |
-| バックエンド | Rust + [windows-rs](https://github.com/microsoft/windows-rs) |
-| ビルドツール | Vite 7 |
+| レイヤー       | 技術                                                         |
+| -------------- | ------------------------------------------------------------ |
+| フレームワーク | [Tauri 2](https://tauri.app/)                                |
+| フロントエンド | React 18 + TypeScript                                        |
+| スタイリング   | [Tailwind CSS v4](https://tailwindcss.com/)                  |
+| アニメーション | [Framer Motion](https://motion.dev/)                         |
+| アイコン       | [Lucide React](https://lucide.dev/)                          |
+| バックエンド   | Rust + [windows-rs](https://github.com/microsoft/windows-rs) |
+| ビルドツール   | Vite 7                                                       |
 
 ## 📄 ライセンス
 
 MIT License
 
------ 
+---
 
 [README.md](../README.md)
