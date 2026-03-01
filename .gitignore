@@ -38,7 +38,6 @@ src-tauri/err.txt
 # Application Specific
 data/
 src-tauri/icons/
-src-tauri/tauri.conf.json
 
 メモ.md
 build_error.log
@@ -59,3 +58,4 @@ src-tauri/build_errors_only.txt
 src-tauri/build_v02.txt
 test_out.txt
 test_result.txt
+*.log

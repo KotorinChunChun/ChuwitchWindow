@@ -1,0 +1,56 @@
+{
+    "productName": "ChuwitchWindow",
+    "version": "0.2.0",
+    "identifier": "com.kotorichun.chuwitchwindow2",
+    "build": {
+        "beforeDevCommand": "npm run dev",
+        "beforeBuildCommand": "npm run build",
+        "devUrl": "http://localhost:5173",
+        "frontendDist": "../dist"
+    },
+    "app": {
+        "windows": [
+            {
+                "label": "main",
+                "title": "ChuwitchWindow 設定",
+                "width": 800,
+                "height": 600,
+                "resizable": true,
+                "fullscreen": false,
+                "maximized": true,
+                "visible": false
+            }
+        ],
+        "security": {
+            "csp": null
+        },
+        "macOSPrivateApi": false
+    },
+    "bundle": {
+        "active": true,
+        "targets": "all",
+        "resources": [
+            "../README.md"
+        ],
+        "icon": [
+            "icons/32x32.png",
+            "icons/128x128.png",
+            "icons/128x128@2x.png",
+            "icons/icon.icns",
+            "icons/icon.ico"
+        ],
+        "windows": {
+            "nsis": {
+                "installMode": "perMachine",
+                "installerHooks": "nsis/hooks.nsh",
+                "languages": [
+                    "Japanese"
+                ]
+            }
+        }
+    },
+    "plugins": {
+        "single-instance": null,
+        "autostart": null
+    }
+}
