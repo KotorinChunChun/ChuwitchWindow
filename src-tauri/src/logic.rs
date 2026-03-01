@@ -38,8 +38,6 @@ pub fn group_windows_by_monitor(
     windows_by_monitor
 }
 
-// 削除
-
 // --- App Logic ---
 
 pub fn handle_rotate(app: &tauri::AppHandle, clockwise: bool) {
@@ -172,7 +170,6 @@ pub fn handle_undo(app: &tauri::AppHandle) {
     }
 }
 
-// 削除
 pub fn handle_swap_target(app: &tauri::AppHandle, target_num: u32) {
     tracing::info!("Exec [handle_swap_target]: target_num={}", target_num);
     let config = crate::config::load_config();
@@ -255,20 +252,7 @@ pub fn handle_swap_target(app: &tauri::AppHandle, target_num: u32) {
     }
 }
 
-// --- v0.2: エスケープとギャザー ---
 
-fn get_active_monitor_index(monitors: &[MonitorInfo]) -> Option<usize> {
-    unsafe {
-        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-        use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
-        
-        let hwnd = GetForegroundWindow();
-        if hwnd.0 == 0 { return None; }
-        
-        let hmonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        monitors.iter().position(|m| m.hmonitor == hmonitor.0 as isize)
-    }
-}
 
 pub fn handle_escape(app: &tauri::AppHandle) {
     tracing::info!("Exec [handle_escape]");
@@ -276,7 +260,7 @@ pub fn handle_escape(app: &tauri::AppHandle) {
     if monitors.len() < 2 { return; }
     
     let config = crate::config::load_config();
-    let active_idx = match get_active_monitor_index(&monitors) {
+    let active_idx = match crate::monitor::get_active_monitor_index(&monitors) {
         Some(idx) => idx,
         None => return,
     };
@@ -324,7 +308,7 @@ pub fn handle_gather(app: &tauri::AppHandle) {
     if monitors.len() < 2 { return; }
     
     let config = crate::config::load_config();
-    let active_idx = match get_active_monitor_index(&monitors) {
+    let active_idx = match crate::monitor::get_active_monitor_index(&monitors) {
         Some(idx) => idx,
         None => return,
     };
@@ -409,6 +393,4 @@ mod tests {
         assert_eq!(grouped[0].len(), 2); // w1, w3
         assert_eq!(grouped[1].len(), 1); // w2
     }
-
-    // 削除
 }

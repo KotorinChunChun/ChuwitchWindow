@@ -131,3 +131,17 @@ unsafe extern "system" fn monitor_enum_proc(
 
     BOOL(1)
 }
+
+/// フォアグラウンドウィンドウが表示されているモニターのインデックスを返す
+pub fn get_active_monitor_index(monitors: &[MonitorInfo]) -> Option<usize> {
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
+        
+        let hwnd = GetForegroundWindow();
+        if hwnd.0 == 0 { return None; }
+        
+        let hmonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        monitors.iter().position(|m| m.hmonitor == hmonitor.0 as isize)
+    }
+}

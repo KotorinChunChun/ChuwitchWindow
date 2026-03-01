@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod arrange;
+pub mod commands;
 pub mod config;
 pub mod history;
 pub mod hotkey;
@@ -13,7 +14,6 @@ pub mod tray;
 pub mod window;
 
 use tauri::{AppHandle, Manager};
-use tracing::info;
 
 pub fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -43,6 +43,19 @@ pub fn show_main_window(app: &AppHandle) {
     }
 }
 
+/// arrange ウィンドウのデフォルトサイズ
+const ARRANGE_WINDOW_WIDTH: f64 = 1200.0;
+const ARRANGE_WINDOW_HEIGHT: f64 = 400.0;
+
+/// モニター領域の中心にウィンドウを配置するための左上座標を計算する
+fn calc_center_position(monitor: &crate::monitor::MonitorInfo, width: f64, height: f64) -> (f64, f64) {
+    let center_x = monitor.monitor_area.left as f64
+        + (monitor.monitor_area.right - monitor.monitor_area.left) as f64 / 2.0;
+    let center_y = monitor.monitor_area.top as f64
+        + (monitor.monitor_area.bottom - monitor.monitor_area.top) as f64 / 2.0;
+    (center_x - width / 2.0, center_y - height / 2.0)
+}
+
 pub fn show_arrange_window(app: &AppHandle) {
     // ウィンドウを表示する「前」に対象モニターを記憶する。
     // この時点では arrange ウィンドウがまだ最前面でないため、
@@ -57,21 +70,14 @@ pub fn show_arrange_window(app: &AppHandle) {
         
         // 中心に移動させる処理
         if let Some(monitor) = get_active_monitor_info() {
-            let width = 1200.0;
-            let height = 400.0;
-            let center_x = monitor.monitor_area.left as f64 + (monitor.monitor_area.right - monitor.monitor_area.left) as f64 / 2.0;
-            let center_y = monitor.monitor_area.top as f64 + (monitor.monitor_area.bottom - monitor.monitor_area.top) as f64 / 2.0;
-
-            let x = center_x - (width / 2.0);
-            let y = center_y - (height / 2.0);
-
+            let (x, y) = calc_center_position(&monitor, ARRANGE_WINDOW_WIDTH, ARRANGE_WINDOW_HEIGHT);
             let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
                 x: x as i32,
                 y: y as i32,
             }));
             let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                width: width,
-                height: height,
+                width: ARRANGE_WINDOW_WIDTH,
+                height: ARRANGE_WINDOW_HEIGHT,
             }));
         }
     } else {
@@ -81,7 +87,7 @@ pub fn show_arrange_window(app: &AppHandle) {
             tauri::WebviewUrl::App("index.html#arrange".into())
         )
         .title("ChuwitchWindow 整列選択")
-        .inner_size(1200.0, 400.0)
+        .inner_size(ARRANGE_WINDOW_WIDTH, ARRANGE_WINDOW_HEIGHT)
         .decorations(false)
         .always_on_top(true)
         .transparent(true)
@@ -89,13 +95,7 @@ pub fn show_arrange_window(app: &AppHandle) {
         .center();
 
         if let Some(monitor) = get_active_monitor_info() {
-            let width = 1200.0;
-            let height = 400.0;
-            let center_x = monitor.monitor_area.left as f64 + (monitor.monitor_area.right - monitor.monitor_area.left) as f64 / 2.0;
-            let center_y = monitor.monitor_area.top as f64 + (monitor.monitor_area.bottom - monitor.monitor_area.top) as f64 / 2.0;
-
-            let x = center_x - (width / 2.0);
-            let y = center_y - (height / 2.0);
+            let (x, y) = calc_center_position(&monitor, ARRANGE_WINDOW_WIDTH, ARRANGE_WINDOW_HEIGHT);
             builder = builder.position(x, y);
         }
 
@@ -128,186 +128,39 @@ pub fn hide_arrange_window(app: &AppHandle) {
 }
 
 
-#[tauri::command]
-fn js_debug_log(message: String) {
-    info!("[JS_LOG] {}", message);
-}
-
-#[tauri::command]
-fn open_url(url: String) {
-    // WindowsでURLを開く標準的な方法 (startコマンド)
-    let _ = std::process::Command::new("cmd")
-        .args(&["/C", "start", &url])
-        .spawn();
-}
-
-#[tauri::command]
-fn get_config() -> config::AppConfig {
-    config::load_config()
-}
-
-#[tauri::command]
-fn save_config(new_config: config::AppConfig) -> Result<(), String> {
-    config::save_config(&new_config);
-    crate::hotkey::reload_hotkeys();
-    Ok(())
-}
-
-#[tauri::command]
-fn get_app_logs_cmd() -> Result<String, String> {
-    logger::get_app_logs()
-}
-
-#[tauri::command]
-fn clear_app_logs_cmd() -> Result<(), String> {
-    logger::clear_app_logs()
-}
-
-#[tauri::command]
-fn reset_config_cmd() -> Result<config::AppConfig, String> {
-    config::reset_config();
-    crate::hotkey::reload_hotkeys();
-    Ok(config::load_config())
-}
-
-#[tauri::command]
-fn is_user_an_admin() -> bool {
-    admin::is_user_an_admin()
-}
-
-#[tauri::command]
-fn restart_as_admin() -> Result<(), String> {
-    admin::restart_as_admin().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn sync_admin_startup(enable: bool) -> Result<(), String> {
-    admin::sync_admin_startup(enable).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn get_all_monitors_cmd() -> Vec<monitor::MonitorInfo> {
-    monitor::get_all_monitors()
-}
-
-#[tauri::command]
-fn trigger_action(action: String, app: AppHandle) {
-    if action == "rotate_cw" {
-        logic::handle_rotate(&app, true);
-    } else if action == "rotate_ccw" {
-        logic::handle_rotate(&app, false);
-    } else if action == "undo" {
-        logic::handle_undo(&app);
-    } else if action.starts_with("swap_target_") {
-        if let Ok(target_num) = action.replace("swap_target_", "").parse::<u32>() {
-            logic::handle_swap_target(&app, target_num);
+/// CLI引数をディスパッチする共通関数。
+/// 引数の中にアクションコマンドが含まれていれば実行し、1つでも実行したら true を返す。
+fn dispatch_cli_action(app: &AppHandle, args: &[String]) -> bool {
+    use tauri::Emitter;
+    let mut matched = false;
+    for arg in args {
+        if arg == "--rotate-cw" {
+            crate::logic::handle_rotate(app, true);
+            matched = true;
+        } else if arg == "--rotate-ccw" {
+            crate::logic::handle_rotate(app, false);
+            matched = true;
+        } else if arg == "--undo" {
+            crate::logic::handle_undo(app);
+            matched = true;
+        } else if arg == "--pin-toggle" {
+            crate::pin::toggle_pin();
+            let _ = app.emit("pin-toggled", ());
+            matched = true;
+        } else if arg == "--escape" {
+            crate::logic::handle_escape(app);
+            matched = true;
+        } else if arg == "--gather" {
+            crate::logic::handle_gather(app);
+            matched = true;
+        } else if let Some(target_str) = arg.strip_prefix("--swap=") {
+            if let Ok(target) = target_str.parse::<u32>() {
+                crate::logic::handle_swap_target(app, target);
+                matched = true;
+            }
         }
     }
-}
-
-#[tauri::command]
-fn check_hotkey_conflict_cmd(hotkey_str: String) -> bool {
-    hotkey::check_hotkey_conflict(hotkey_str)
-}
-
-#[tauri::command]
-fn set_recording_state_cmd(is_recording: bool) {
-    hotkey::set_recording_state(is_recording)
-}
-
-#[derive(serde::Serialize)]
-pub struct WindowUIData {
-    pub hwnd: isize,
-    pub title: String,
-    pub process_name: String,
-    pub class_name: String,
-    pub is_pinned: bool,
-    pub style: u32,
-    pub ex_style: u32,
-}
-
-#[tauri::command]
-fn get_window_list_cmd() -> Vec<WindowUIData> {
-    let mut result = Vec::new();
-    let wins = crate::window::get_target_windows(false, false); 
-    
-    for w in wins {
-        result.push(WindowUIData {
-            hwnd: w.hwnd,
-            title: w.title,
-            process_name: w.process_name,
-            class_name: w.class_name,
-            is_pinned: crate::pin::is_pinned(w.hwnd),
-            style: w.style,
-            ex_style: w.ex_style,
-        });
-    }
-    result
-}
-
-// Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
-#[tauri::command]
-fn show_arrange_window_cmd(app: AppHandle) {
-    show_arrange_window(&app);
-}
-
-#[tauri::command]
-fn hide_arrange_window_cmd(app: AppHandle) {
-    hide_arrange_window(&app);
-}
-
-#[tauri::command]
-fn exec_arrange_cmd(arrange_type: String, app: AppHandle) {
-    info!("Exec [exec_arrange_cmd]: type_str='{}'", arrange_type);
-    
-    let typ = match arrange_type.as_str() {
-        "Grid" => arrange::ArrangeType::Grid,
-        "Vertical" => arrange::ArrangeType::Vertical,
-        "Horizontal" => arrange::ArrangeType::Horizontal,
-        "Cascade" => arrange::ArrangeType::Cascade,
-        _ => {
-            info!("[exec_arrange_cmd] 不明な整列タイプ: {}", arrange_type);
-            arrange::ArrangeType::Grid
-        }
-    };
-
-    arrange::handle_arrange(&app, typ);
-    hide_arrange_window(&app);
-}
-
-#[tauri::command]
-fn export_config_cmd(path: String) -> Result<(), String> {
-    let config = config::load_config();
-    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn import_config_cmd(path: String) -> Result<config::AppConfig, String> {
-    let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let new_config: config::AppConfig = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    config::save_config(&new_config);
-    Ok(new_config)
-}
-
-#[tauri::command]
-async fn register_to_path_cmd() -> Result<(), String> {
-    admin::register_to_path()
-}
-
-#[tauri::command]
-async fn check_path_registered_cmd() -> Result<bool, String> {
-    admin::check_path_registered()
-}
-
-#[tauri::command]
-async fn unregister_from_path_cmd() -> Result<(), String> {
-    admin::unregister_from_path()
+    matched
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -318,35 +171,7 @@ pub fn run() {
             let args: Vec<String> = std::env::args().collect();
             tracing::info!("App starting with args: {:?}", args);
 
-            let mut is_oneshot = false;
-            for arg in &args {
-                if arg == "--rotate-cw" {
-                    crate::logic::handle_rotate(app.handle(), true);
-                    is_oneshot = true;
-                } else if arg == "--rotate-ccw" {
-                    crate::logic::handle_rotate(app.handle(), false);
-                    is_oneshot = true;
-                } else if arg == "--undo" {
-                    crate::logic::handle_undo(app.handle());
-                    is_oneshot = true;
-                } else if arg == "--pin-toggle" {
-                    crate::pin::toggle_pin();
-                    is_oneshot = true;
-                } else if arg == "--escape" {
-                    crate::logic::handle_escape(app.handle());
-                    is_oneshot = true;
-                } else if arg == "--gather" {
-                    crate::logic::handle_gather(app.handle());
-                    is_oneshot = true;
-                } else if let Some(target_str) = arg.strip_prefix("--swap=") {
-                    if let Ok(target) = target_str.parse::<u32>() {
-                        crate::logic::handle_swap_target(app.handle(), target);
-                        is_oneshot = true;
-                    }
-                }
-            }
-
-            if is_oneshot {
+            if dispatch_cli_action(app.handle(), &args) {
                 // ワンショット実行の場合は常駐せずに即終了
                 app.handle().exit(0);
                 return Ok(());
@@ -371,38 +196,9 @@ pub fn run() {
         })
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             tracing::info!("Received IPC args from secondary instance: {:?}", args);
-            let mut is_cli_cmd = false;
-            for arg in &args {
-                if arg == "--rotate-cw" {
-                    crate::logic::handle_rotate(app, true);
-                    is_cli_cmd = true;
-                } else if arg == "--rotate-ccw" {
-                    crate::logic::handle_rotate(app, false);
-                    is_cli_cmd = true;
-                } else if arg == "--undo" {
-                    crate::logic::handle_undo(app);
-                    is_cli_cmd = true;
-                } else if arg == "--pin-toggle" {
-                    crate::pin::toggle_pin();
-                    use tauri::Emitter;
-                    let _ = app.emit("pin-toggled", ());
-                    is_cli_cmd = true;
-                } else if arg == "--escape" {
-                    crate::logic::handle_escape(app);
-                    is_cli_cmd = true;
-                } else if arg == "--gather" {
-                    crate::logic::handle_gather(app);
-                    is_cli_cmd = true;
-                } else if let Some(target_str) = arg.strip_prefix("--swap=") {
-                    if let Ok(target) = target_str.parse::<u32>() {
-                        crate::logic::handle_swap_target(app, target);
-                        is_cli_cmd = true;
-                    }
-                }
-            }
 
             // CLIコマンドでなければ通常のGUI呼出とみなしてメイン画面を表示
-            if !is_cli_cmd {
+            if !dispatch_cli_action(app, &args) {
                 crate::show_main_window(app);
             }
         }))
@@ -412,30 +208,29 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            greet,
-            get_config,
-            save_config,
-            is_user_an_admin,
-            restart_as_admin,
-            sync_admin_startup,
-            get_all_monitors_cmd,
-            trigger_action,
-            check_hotkey_conflict_cmd,
-            set_recording_state_cmd,
-            reset_config_cmd,
-            open_url,
-            get_window_list_cmd,
-            get_app_logs_cmd,
-            clear_app_logs_cmd,
-            show_arrange_window_cmd,
-            hide_arrange_window_cmd,
-            exec_arrange_cmd,
-            export_config_cmd,
-            import_config_cmd,
-            register_to_path_cmd,
-            check_path_registered_cmd,
-            unregister_from_path_cmd,
-            js_debug_log,
+            commands::get_config,
+            commands::save_config,
+            commands::is_user_an_admin,
+            commands::restart_as_admin,
+            commands::sync_admin_startup,
+            commands::get_all_monitors_cmd,
+            commands::trigger_action,
+            commands::check_hotkey_conflict_cmd,
+            commands::set_recording_state_cmd,
+            commands::reset_config_cmd,
+            commands::open_url,
+            commands::get_window_list_cmd,
+            commands::get_app_logs_cmd,
+            commands::clear_app_logs_cmd,
+            commands::show_arrange_window_cmd,
+            commands::hide_arrange_window_cmd,
+            commands::exec_arrange_cmd,
+            commands::export_config_cmd,
+            commands::import_config_cmd,
+            commands::register_to_path_cmd,
+            commands::check_path_registered_cmd,
+            commands::unregister_from_path_cmd,
+            commands::js_debug_log,
         ])
         .on_window_event(|window, event| {
             match event {

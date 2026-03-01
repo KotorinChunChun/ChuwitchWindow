@@ -83,4 +83,3 @@ export function ArrangePopup() {
     </div>
   );
 }
-console.log('ArrangePopup render');

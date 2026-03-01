@@ -48,7 +48,7 @@ pub fn handle_arrange(app: &tauri::AppHandle, arrange_type: ArrangeType) {
             hmon, idx, monitors[idx].name);
         idx
     } else {
-        let idx = get_active_monitor_index(&monitors).unwrap_or(0);
+        let idx = crate::monitor::get_active_monitor_index(&monitors).unwrap_or(0);
         info!("[arrange] 記憶なし: GetForegroundWindow() → monitors[{}]={} を対象に決定",
             idx, monitors[idx].name);
         idx
@@ -246,18 +246,6 @@ fn is_window_on_monitor(win: &WindowInfo, monitor: &MonitorInfo) -> bool {
     false
 }
 
-fn get_active_monitor_index(monitors: &[MonitorInfo]) -> Option<usize> {
-    unsafe {
-        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-        use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
-        
-        let hwnd = GetForegroundWindow();
-        if hwnd.0 == 0 { return None; }
-        
-        let hmonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        monitors.iter().position(|m| m.hmonitor == hmonitor.0 as isize)
-    }
-}
 
 fn calculate_layout(targets: &[WindowInfo], area: &MonitorRect, arrange_type: ArrangeType) -> Vec<MonitorRect> {
     let n = targets.len();
