@@ -1,0 +1,29 @@
+[[permission]]
+identifier = "allow-all"
+description = "Allow all commands for ChuwitchWindow"
+commands.allow = [
+    "greet",
+    "get_config",
+    "save_config",
+    "is_user_an_admin",
+    "restart_as_admin",
+    "sync_admin_startup",
+    "get_all_monitors_cmd",
+    "trigger_action",
+    "check_hotkey_conflict_cmd",
+    "set_recording_state_cmd",
+    "reset_config_cmd",
+    "open_url",
+    "get_window_list_cmd",
+    "get_app_logs_cmd",
+    "clear_app_logs_cmd",
+    "show_arrange_window_cmd",
+    "hide_arrange_window_cmd",
+    "exec_arrange_cmd",
+    "export_config_cmd",
+    "import_config_cmd",
+    "register_to_path_cmd",
+    "check_path_registered_cmd",
+    "unregister_from_path_cmd",
+    "js_debug_log"
+]

@@ -43,11 +43,13 @@ pub fn group_windows_by_monitor(
 // --- App Logic ---
 
 pub fn handle_rotate(app: &tauri::AppHandle, clockwise: bool) {
+    tracing::info!("Exec [handle_rotate]: clockwise={}", clockwise);
     let mut monitors = get_all_monitors();
     if monitors.is_empty() {
         return;
     }
     let config = crate::config::load_config();
+    let parsed_rules = crate::rule::parse_rules(&config.exclusion_rules);
     
     // config.monitor_order に基づきソート。未指定のものは末尾に（X座標でフォールバックソート）
     monitors.sort_by(|a, b| {
@@ -62,7 +64,21 @@ pub fn handle_rotate(app: &tauri::AppHandle, clockwise: bool) {
         }
     });
     
-    let windows = get_target_windows(config.ignore_fullscreen);
+    let windows: Vec<WindowInfo> = get_target_windows(config.ignore_fullscreen, config.exclude_minimized)
+        .into_iter()
+        .filter(|w| {
+            if crate::pin::is_pinned(w.hwnd) {
+                tracing::info!("Excluded by Pin: {} ({})", w.title, w.hwnd);
+                false
+            } else { true }
+        })
+        .filter(|w| {
+            if crate::rule::is_excluded(w, &parsed_rules) {
+                tracing::info!("Excluded by Rule: {} ({})", w.title, w.hwnd);
+                false
+            } else { true }
+        })
+        .collect();
     if windows.is_empty() {
         return;
     }
@@ -129,6 +145,7 @@ pub fn handle_rotate(app: &tauri::AppHandle, clockwise: bool) {
 }
 
 pub fn handle_undo(app: &tauri::AppHandle) {
+    tracing::info!("Exec [handle_undo]");
     let history_state = app.state::<HistoryState>();
     if let Some(actions) = history_state.pop() {
         use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, HWND_TOP};
@@ -157,6 +174,7 @@ pub fn handle_undo(app: &tauri::AppHandle) {
 
 // 削除
 pub fn handle_swap_target(app: &tauri::AppHandle, target_num: u32) {
+    tracing::info!("Exec [handle_swap_target]: target_num={}", target_num);
     let config = crate::config::load_config();
     let mut monitors = get_all_monitors();
     if monitors.len() < 2 {
@@ -190,7 +208,23 @@ pub fn handle_swap_target(app: &tauri::AppHandle, target_num: u32) {
         return; // same monitor
     }
 
-    let windows = get_target_windows(config.ignore_fullscreen);
+    let parsed_rules = crate::rule::parse_rules(&config.exclusion_rules);
+
+    let windows: Vec<WindowInfo> = get_target_windows(config.ignore_fullscreen, config.exclude_minimized)
+        .into_iter()
+        .filter(|w| {
+            if crate::pin::is_pinned(w.hwnd) {
+                tracing::info!("Excluded by Pin: {} ({})", w.title, w.hwnd);
+                false
+            } else { true }
+        })
+        .filter(|w| {
+            if crate::rule::is_excluded(w, &parsed_rules) {
+                tracing::info!("Excluded by Rule: {} ({})", w.title, w.hwnd);
+                false
+            } else { true }
+        })
+        .collect();
     if windows.is_empty() {
         return;
     }
@@ -211,13 +245,115 @@ pub fn handle_swap_target(app: &tauri::AppHandle, target_num: u32) {
     let primary_wins = &windows_by_monitor[primary_idx];
     let target_wins = &windows_by_monitor[target_idx];
 
-    let mut swapped_any = false;
+    let mut _swapped_any = false;
     if !primary_wins.is_empty() {
         move_windows(primary_wins, &monitors[primary_idx], &monitors[target_idx]);
-        swapped_any = true;
+        _swapped_any = true;
     }
     if !target_wins.is_empty() {
         move_windows(target_wins, &monitors[target_idx], &monitors[primary_idx]);
+    }
+}
+
+// --- v0.2: エスケープとギャザー ---
+
+fn get_active_monitor_index(monitors: &[MonitorInfo]) -> Option<usize> {
+    unsafe {
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
+        
+        let hwnd = GetForegroundWindow();
+        if hwnd.0 == 0 { return None; }
+        
+        let hmonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        monitors.iter().position(|m| m.hmonitor == hmonitor.0 as isize)
+    }
+}
+
+pub fn handle_escape(app: &tauri::AppHandle) {
+    tracing::info!("Exec [handle_escape]");
+    let monitors = get_all_monitors();
+    if monitors.len() < 2 { return; }
+    
+    let config = crate::config::load_config();
+    let active_idx = match get_active_monitor_index(&monitors) {
+        Some(idx) => idx,
+        None => return,
+    };
+    
+    // 退避先モニターの決定 (プライマリ優先、自身がプライマリなら他のモニター)
+    let target_idx = if monitors[active_idx].is_primary {
+        monitors.iter().position(|m| !m.is_primary).unwrap_or(0)
+    } else {
+        monitors.iter().position(|m| m.is_primary).unwrap_or(0)
+    };
+    
+    if active_idx == target_idx { return; }
+    
+    let parsed_rules = crate::rule::parse_rules(&config.exclusion_rules);
+    
+    let windows: Vec<WindowInfo> = get_target_windows(config.ignore_fullscreen, config.exclude_minimized)
+        .into_iter()
+        .filter(|w| !crate::pin::is_pinned(w.hwnd))
+        .filter(|w| !crate::rule::is_excluded(w, &parsed_rules)) // v0.2: ルール除外
+        .collect();
+    if windows.is_empty() { return; }
+        
+    let history_state = app.state::<HistoryState>();
+    let mut actions = Vec::new();
+    for win in windows.iter() {
+        actions.push(MoveAction {
+            hwnd: win.hwnd,
+            old_rect: win.rect.clone(),
+            new_rect: win.rect.clone(),
+        });
+    }
+    history_state.push(actions);
+    
+    let windows_by_monitor = group_windows_by_monitor(&windows, &monitors);
+    let active_wins = &windows_by_monitor[active_idx];
+    
+    if !active_wins.is_empty() {
+        move_windows(active_wins, &monitors[active_idx], &monitors[target_idx]);
+    }
+}
+
+pub fn handle_gather(app: &tauri::AppHandle) {
+    tracing::info!("Exec [handle_gather]");
+    let monitors = get_all_monitors();
+    if monitors.len() < 2 { return; }
+    
+    let config = crate::config::load_config();
+    let active_idx = match get_active_monitor_index(&monitors) {
+        Some(idx) => idx,
+        None => return,
+    };
+    
+    let parsed_rules = crate::rule::parse_rules(&config.exclusion_rules);
+    
+    let windows: Vec<WindowInfo> = get_target_windows(config.ignore_fullscreen, config.exclude_minimized)
+        .into_iter()
+        .filter(|w| !crate::pin::is_pinned(w.hwnd))
+        .filter(|w| !crate::rule::is_excluded(w, &parsed_rules)) // v0.2: ルール除外
+        .collect();
+    if windows.is_empty() { return; }
+        
+    let history_state = app.state::<HistoryState>();
+    let mut actions = Vec::new();
+    for win in windows.iter() {
+        actions.push(MoveAction {
+            hwnd: win.hwnd,
+            old_rect: win.rect.clone(),
+            new_rect: win.rect.clone(),
+        });
+    }
+    history_state.push(actions);
+    
+    let windows_by_monitor = group_windows_by_monitor(&windows, &monitors);
+    
+    for (i, wins) in windows_by_monitor.iter().enumerate() {
+        if i == active_idx || wins.is_empty() { continue; }
+        move_windows(wins, &monitors[i], &monitors[active_idx]);
     }
 }
 
@@ -248,6 +384,10 @@ mod tests {
             is_maximized: false,
             is_minimized: false,
             is_fullscreen: false,
+            process_name: "mock.exe".to_string(),
+            class_name: "MockClass".to_string(),
+            style: 0,
+            ex_style: 0,
         }
     }
 

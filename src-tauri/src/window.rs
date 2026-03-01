@@ -1,17 +1,22 @@
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, CloseHandle};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, COINIT_MULTITHREADED, CLSCTX_INPROC_SERVER,
 };
+use windows::Win32::System::Threading::{
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetCurrentProcessId,
+};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Shell::{IVirtualDesktopManager, VirtualDesktopManager};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetAncestor, GetLastActivePopup, GetWindowPlacement, GetWindowRect,
-    GetWindowTextLengthW, GetWindowTextW, IsWindowVisible, WINDOWPLACEMENT, GA_ROOTOWNER,
-    SW_SHOWMAXIMIZED, SW_SHOWMINIMIZED, GetWindowLongW, GWL_STYLE, WS_CAPTION, WS_THICKFRAME,
+    EnumWindows, GetAncestor, GetClassNameW, GetLastActivePopup, GetWindowPlacement,
+    GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+    IsWindowVisible, WINDOWPLACEMENT, GA_ROOTOWNER,
+    SW_SHOWMAXIMIZED, SW_SHOWMINIMIZED, GetWindowLongW, GWL_STYLE, GWL_EXSTYLE, WS_CAPTION, WS_THICKFRAME,
 };
 
 use crate::monitor::MonitorRect;
@@ -25,6 +30,12 @@ pub struct WindowInfo {
     pub is_maximized: bool,
     pub is_minimized: bool,
     pub is_fullscreen: bool,
+    /// プロセス名（例: "notepad.exe"）― 除外ルール用 (v0.2)
+    pub process_name: String,
+    /// ウィンドウクラス名（例: "Notepad"）― 除外ルール用 (v0.2)
+    pub class_name: String,
+    pub style: u32,
+    pub ex_style: u32,
 }
 
 struct EnumState {
@@ -32,9 +43,11 @@ struct EnumState {
     vdm: Option<IVirtualDesktopManager>,
     monitors: Vec<crate::monitor::MonitorInfo>,
     ignore_fullscreen: bool,
+    /// v0.2: 最小化ウィンドウを移動対象から除外するか
+    exclude_minimized: bool,
 }
 
-pub fn get_target_windows(ignore_fullscreen: bool) -> Vec<WindowInfo> {
+pub fn get_target_windows(ignore_fullscreen: bool, exclude_minimized: bool) -> Vec<WindowInfo> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
     }
@@ -47,6 +60,7 @@ pub fn get_target_windows(ignore_fullscreen: bool) -> Vec<WindowInfo> {
         vdm,
         monitors: crate::monitor::get_all_monitors(),
         ignore_fullscreen,
+        exclude_minimized,
     });
 
     unsafe {
@@ -107,6 +121,13 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
         return BOOL(1);
     }
 
+    // 自プロセスのウィンドウは除外（設定画面やポップアップなど）
+    let mut pid: u32 = 0;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    if unsafe { GetCurrentProcessId() } == pid {
+        return BOOL(1);
+    }
+
     let title = get_window_title(hwnd);
     if title.is_empty() {
         return BOOL(1);
@@ -134,10 +155,10 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let mut rect = RECT::default();
     let _ = GetWindowRect(hwnd, &mut rect);
 
-    // Get DPI
+    // DPI を取得
     let dpi = GetDpiForWindow(hwnd);
 
-    // Window placements
+    // ウィンドウ配置情報を取得
     let mut placement = WINDOWPLACEMENT::default();
     placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
     let _ = GetWindowPlacement(hwnd, &mut placement);
@@ -146,6 +167,7 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let is_minimized = placement.showCmd == SW_SHOWMINIMIZED.0 as u32;
 
     let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
+    let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
     let has_caption = (style & WS_CAPTION.0) == WS_CAPTION.0;
     let has_thickframe = (style & WS_THICKFRAME.0) == WS_THICKFRAME.0;
 
@@ -161,6 +183,47 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
         return BOOL(1);
     }
 
+    // v0.2: 最小化ウィンドウの除外 (SPEC 2-5)
+    if state.exclude_minimized && is_minimized {
+        return BOOL(1);
+    }
+
+    // --- v0.2: プロセス名を取得 ---
+    let process_name = {
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid != 0 {
+            if let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                let mut buf = [0u16; 260];
+                let mut len = buf.len() as u32;
+                if QueryFullProcessImageNameW(process, PROCESS_NAME_FORMAT(0), windows::core::PWSTR(buf.as_mut_ptr()), &mut len).is_ok() {
+                    let full_path = OsString::from_wide(&buf[..len as usize]).to_string_lossy().into_owned();
+                    let _ = CloseHandle(process);
+                    // フルパスからファイル名部分のみ抽出
+                    full_path.rsplit('\\').next().unwrap_or(&full_path).to_string()
+                } else {
+                    let _ = CloseHandle(process);
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        }
+    };
+
+    // --- v0.2: ウィンドウクラス名を取得 ---
+    let class_name = {
+        let mut buf = [0u16; 256];
+        let len = GetClassNameW(hwnd, &mut buf);
+        if len > 0 {
+            OsString::from_wide(&buf[..len as usize]).to_string_lossy().into_owned()
+        } else {
+            String::new()
+        }
+    };
+
     state.windows.push(WindowInfo {
         hwnd: hwnd.0 as isize,
         title,
@@ -169,6 +232,10 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
         is_maximized,
         is_minimized,
         is_fullscreen,
+        process_name,
+        class_name,
+        style,
+        ex_style,
     });
 
     BOOL(1)

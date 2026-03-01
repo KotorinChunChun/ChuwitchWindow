@@ -1,6 +1,6 @@
 [package]
 name = "chuwitchwindow"
-version = "0.1.2"
+version = "0.2.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -19,6 +19,8 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 tracing-appender = "0.2.4"
 directories = "6.0.0"
 global-hotkey = "0.7.0"
+chrono = "0.4.38"
+tauri-plugin-dialog = "2.0.0"
 
 [dependencies.windows]
 version = "0.52.0"

@@ -4,9 +4,13 @@
     "description": "Default permissions for the desktop application",
     "windows": [
         "main",
-        "osd"
+        "osd",
+        "arrange"
     ],
     "permissions": [
-        "core:default"
+        "core:default",
+        "dialog:default",
+        "autostart:default",
+        "allow-all"
     ]
 }

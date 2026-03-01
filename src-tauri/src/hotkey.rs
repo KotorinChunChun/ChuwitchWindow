@@ -4,7 +4,7 @@ use global_hotkey::{
 };
 use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 
@@ -50,13 +50,42 @@ pub fn init(app: AppHandle) {
                     } else if undo_key.is_some() && event.id == undo_key.unwrap().id() {
                         crate::logic::handle_undo(app_handle);
                     } else {
-                        // Check if it matches target monitors (2~9)
-                        for target_num in 2..=9 {
-                            let target_hotkey_str = format!("{}+{}", config.swap_target_modifiers, target_num);
-                            if let Some(target_key) = parse_hotkey(&target_hotkey_str) {
-                                if event.id == target_key.id() {
-                                    crate::logic::handle_swap_target(app_handle, target_num);
-                                    break;
+                        // v0.2: ピン留めキーの判定
+                        let pin_key = parse_hotkey(&config.pin_hotkey);
+                        let escape_key = parse_hotkey(&config.escape_hotkey);
+                        let gather_key = parse_hotkey(&config.gather_hotkey);
+                        
+                        if pin_key.is_some() && event.id == pin_key.unwrap().id() {
+                            crate::pin::toggle_pin();
+                            let _ = app_handle.emit("pin-toggled", ());
+                        } else if escape_key.is_some() && event.id == escape_key.unwrap().id() {
+                            crate::logic::handle_escape(app_handle);
+                        } else if gather_key.is_some() && event.id == gather_key.unwrap().id() {
+                            crate::logic::handle_gather(app_handle);
+                        } else if let Some(arrange_key) = parse_hotkey(&config.arrange_hotkey) {
+                            if event.id == arrange_key.id() {
+                                crate::show_arrange_window(app_handle);
+                            } else {
+                                // Check if it matches target monitors (2~9)
+                                for target_num in 2..=9 {
+                                    let target_hotkey_str = format!("{}+{}", config.swap_target_modifiers, target_num);
+                                    if let Some(target_key) = parse_hotkey(&target_hotkey_str) {
+                                        if event.id == target_key.id() {
+                                            crate::logic::handle_swap_target(app_handle, target_num);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // Check if it matches target monitors (2~9)
+                            for target_num in 2..=9 {
+                                let target_hotkey_str = format!("{}+{}", config.swap_target_modifiers, target_num);
+                                if let Some(target_key) = parse_hotkey(&target_hotkey_str) {
+                                    if event.id == target_key.id() {
+                                        crate::logic::handle_swap_target(app_handle, target_num);
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -74,6 +103,12 @@ pub fn reload_hotkeys() {
     if let Some(k) = parse_hotkey(&config.rotate_cw_hotkey) { keys_to_register.push(k); }
     if let Some(k) = parse_hotkey(&config.rotate_ccw_hotkey) { keys_to_register.push(k); }
     if let Some(k) = parse_hotkey(&config.undo_hotkey) { keys_to_register.push(k); }
+    // v0.2: ピン留めキーの登録
+    if let Some(k) = parse_hotkey(&config.pin_hotkey) { keys_to_register.push(k); }
+    // v0.2: エスケープとギャザーの登録
+    if let Some(k) = parse_hotkey(&config.escape_hotkey) { keys_to_register.push(k); }
+    if let Some(k) = parse_hotkey(&config.gather_hotkey) { keys_to_register.push(k); }
+    if let Some(k) = parse_hotkey(&config.arrange_hotkey) { keys_to_register.push(k); }
     
     // Register 2~9 target modifiers
     if !config.swap_target_modifiers.is_empty() {

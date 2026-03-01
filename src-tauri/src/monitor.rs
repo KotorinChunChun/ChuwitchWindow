@@ -6,7 +6,7 @@ use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW, EnumDisplayDevicesW, DISPLAY_DEVICEW
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MonitorRect {
     pub left: i32,
     pub top: i32,

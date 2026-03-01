@@ -46,3 +46,16 @@ src-tauri/build_error_monitor.txt
 build_test/
 release/
 *.pptx
+build_err.txt
+build_stderr.txt
+src-tauri/check_err.txt
+src-tauri/compile_err.txt
+src-tauri/test_stderr.txt
+test_stderr.txt
+tsc_err.txt
+tsc_output.txt
+vite_err.txt
+src-tauri/build_errors_only.txt
+src-tauri/build_v02.txt
+test_out.txt
+test_result.txt

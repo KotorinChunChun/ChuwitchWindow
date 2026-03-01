@@ -74,3 +74,85 @@ pub fn sync_admin_startup(enable: bool) -> Result<(), Box<dyn std::error::Error>
     }
     Ok(())
 }
+
+pub fn register_to_path() -> Result<(), String> {
+    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+    let bin_dir = exe_path.parent().ok_or("Failed to get parent directory")?;
+    let bin_dir_str = bin_dir.to_string_lossy();
+
+    // PowerShell を使用して PATH を安全に編集
+    // [Environment]::SetEnvironmentVariable('Path', $newPath, 'User')
+    let script = format!(
+        "$currentPath = [Environment]::GetEnvironmentVariable('Path', 'User'); \
+         if ($currentPath -split ';' -notcontains '{}') {{ \
+             $newPath = $currentPath + ';' + '{}'; \
+             [Environment]::SetEnvironmentVariable('Path', $newPath, 'User'); \
+             Write-Host 'Success'; \
+         }} else {{ \
+             Write-Host 'AlreadyExists'; \
+         }}",
+        bin_dir_str, bin_dir_str
+    );
+
+    let output = std::process::Command::new("powershell")
+        .args(&["-Command", &script])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
+pub fn check_path_registered() -> Result<bool, String> {
+    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+    let bin_dir = exe_path.parent().ok_or("Failed to get parent directory")?;
+    let bin_dir_str = bin_dir.to_string_lossy();
+    
+    let script = format!(
+        "$currentPath = [Environment]::GetEnvironmentVariable('Path', 'User'); \
+         if ($currentPath -split ';' -contains '{}') {{ Write-Host 'true' }} else {{ Write-Host 'false' }}",
+        bin_dir_str
+    );
+
+    let output = std::process::Command::new("powershell")
+        .args(&["-Command", &script])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if output.status.success() {
+        let res = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(res == "true")
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
+pub fn unregister_from_path() -> Result<(), String> {
+    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
+    let bin_dir = exe_path.parent().ok_or("Failed to get parent directory")?;
+    let bin_dir_str = bin_dir.to_string_lossy();
+    
+    let script = format!(
+        "$currentPath = [Environment]::GetEnvironmentVariable('Path', 'User'); \
+         $parts = $currentPath -split ';'; \
+         $newParts = $parts | Where-Object {{ $_ -ne '{}' }}; \
+         $newPath = $newParts -join ';'; \
+         [Environment]::SetEnvironmentVariable('Path', $newPath, 'User'); \
+         Write-Host 'Success'",
+        bin_dir_str
+    );
+
+    let output = std::process::Command::new("powershell")
+        .args(&["-Command", &script])
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}

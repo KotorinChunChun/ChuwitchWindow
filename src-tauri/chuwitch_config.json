@@ -1,0 +1,19 @@
+{
+  "rotate_cw_hotkey": "Win+Ctrl+Alt+Right",
+  "rotate_ccw_hotkey": "Win+Ctrl+Alt+Left",
+  "undo_hotkey": "Win+Ctrl+Alt+Z",
+  "swap_target_modifiers": "Win+Ctrl+Alt",
+  "primary_monitor_id": null,
+  "swap_within_groups": false,
+  "monitor_order": [],
+  "ignore_fullscreen": true,
+  "run_on_startup": false,
+  "run_as_admin": false,
+  "monitor_groups": {},
+  "pin_hotkey": "Win+Ctrl+Alt+P",
+  "escape_hotkey": "Win+Ctrl+Alt+E",
+  "gather_hotkey": "Win+Ctrl+Alt+G",
+  "arrange_hotkey": "Win+Ctrl+Alt+A",
+  "exclude_minimized": true,
+  "exclusion_rules": "{\n  \"type\": \"group\",\n  \"match_type\": \"OR\",\n  \"children\": [\n    {\n      \"type\": \"rule\",\n      \"conditions\": [\n        {\n          \"field\": \"process_name\",\n          \"operator\": \"equals\",\n          \"value\": \"Antigravity.exe\"\n        },\n        {\n          \"field\": \"title\",\n          \"operator\": \"contains\",\n          \"value\": \"Antigravity\"\n        }\n      ]\n    }\n  ]\n}"
+}
