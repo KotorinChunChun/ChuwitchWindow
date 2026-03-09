@@ -5,6 +5,9 @@ use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNOACTIVATE;
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::process::CommandExt;
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub fn is_user_an_admin() -> bool {
     let mut handle: HANDLE = HANDLE::default();
@@ -65,11 +68,13 @@ pub fn sync_admin_startup(enable: bool) -> Result<(), Box<dyn std::error::Error>
         );
         let _ = std::process::Command::new("cmd")
             .args(&["/C", &script])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()?;
     } else {
         let script = format!("schtasks /Delete /F /TN \"{}\"", task_name);
         let _ = std::process::Command::new("cmd")
             .args(&["/C", &script])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()?;
     }
     Ok(())
@@ -96,6 +101,7 @@ pub fn register_to_path() -> Result<(), String> {
 
     let output = std::process::Command::new("powershell")
         .args(&["-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| e.to_string())?;
 
@@ -119,6 +125,7 @@ pub fn check_path_registered() -> Result<bool, String> {
 
     let output = std::process::Command::new("powershell")
         .args(&["-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| e.to_string())?;
 
@@ -147,6 +154,7 @@ pub fn unregister_from_path() -> Result<(), String> {
 
     let output = std::process::Command::new("powershell")
         .args(&["-Command", &script])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map_err(|e| e.to_string())?;
 

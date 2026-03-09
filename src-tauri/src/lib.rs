@@ -123,7 +123,7 @@ fn get_active_monitor_info() -> Option<crate::monitor::MonitorInfo> {
 
 pub fn hide_arrange_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("arrange") {
-        let _ = window.hide();
+        let _ = window.close();
     }
 }
 
@@ -238,9 +238,9 @@ pub fn run() {
                     // 何もしなければそのままWindowがClose（破棄）される
                 }
                 tauri::WindowEvent::Focused(focused) => {
-                    // フォーカスが外れた場合、ArrangePopupなら非表示にする
+                    // フォーカスが外れた場合、ArrangePopupなら破棄してメモリを解放する
                     if !focused && window.label() == "arrange" {
-                        let _ = window.hide();
+                        let _ = window.close();
                     }
                 }
                 tauri::WindowEvent::Resized(_) => {
