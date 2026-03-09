@@ -83,7 +83,7 @@ export function SettingsPanel({
                                 onChange={(v) => updateConfig({ swap_within_groups: v })}
                             />
                             <ToggleOption
-                                label="フルスクリーンウィンドウを除外"
+                                label="フルスクリーンウィンドウを移動対象から除外"
                                 description="ゲームなどのフルスクリーンウィンドウは移動対象から外します"
                                 checked={config.ignore_fullscreen}
                                 onChange={(v) => updateConfig({ ignore_fullscreen: v })}

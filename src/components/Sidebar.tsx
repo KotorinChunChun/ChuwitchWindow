@@ -30,7 +30,7 @@ export function Sidebar({
         <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">
           ChuwitchWindow
         </h1>
-        <p className="text-xs text-slate-400 mt-1">Multi-Monitor Wizard</p>
+        <p className="text-xs text-slate-400 mt-1">ウィンドウ入れ替えツール</p>
       </div>
 
       <nav className="flex-1 px-4 space-y-2 mt-4">

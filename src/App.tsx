@@ -175,7 +175,7 @@ function MainApp() {
                   モニターマップ
                 </h2>
                 <p className="text-slate-400 mt-1">
-                  モニタをクリックすると所属グループ（色）を変更でき、同じ色のモニタ間でウィンドウを一斉交換できます。
+                  モニタをクリックすると【入れ替えグループ】【順位】【プライマリ】を変更できます。
                 </p>
               </div>
               <div className="flex-1 rounded-2xl bg-slate-900/40 border border-slate-800 backdrop-blur-sm p-6 flex flex-col min-h-0 relative">
