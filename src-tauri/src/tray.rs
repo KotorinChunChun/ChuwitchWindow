@@ -1,11 +1,11 @@
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::{TrayIconBuilder, TrayIconEvent},
-    AppHandle,
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Manager,
 };
 
 pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let settings_i = MenuItem::with_id(app, "settings", "設定（ダブルクリックで表示）", true, None::<&str>)?;
+    let settings_i = MenuItem::with_id(app, "settings", "ChuwitchWindowの設定", true, None::<&str>)?;
     let restart_i = MenuItem::with_id(app, "restart", "再起動", true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app, "quit", "終了", true, None::<&str>)?;
 
@@ -17,6 +17,7 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .tooltip("ウィンドウ入れ替えツール (ChuwitchWindow)")
         .icon(icon)
         .menu(&menu)
+        .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "quit" => std::process::exit(0),
             "restart" => app.restart(),
@@ -25,10 +26,20 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             }
             _ => {}
         })
-        .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::DoubleClick { .. } = event {
+        .on_tray_icon_event(|tray, event| match event {
+            TrayIconEvent::Click { button: MouseButton::Left, .. } => {
+                if let Some(window) = tray.app_handle().get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_always_on_top(true);
+                    let _ = window.set_always_on_top(false);
+                    let _ = window.set_focus();
+                }
+            }
+            TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } => {
                 crate::show_main_window(tray.app_handle());
             }
+            _ => {}
         })
         .build(app)?;
 
