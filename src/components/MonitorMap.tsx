@@ -59,13 +59,19 @@ export function MonitorMap({ monitors, config, onChange }: { monitors: MonitorIn
     const fontSmall = avgH * 0.04;
     const badgeR = avgH * 0.08;
     const badgeText = avgH * 0.1;
-    const strokeW = avgH * 0.005;
+    const strokeW = avgH * 0.01;
+    const monitorStrokeW = avgH * 0.02;
+    const focusStrokeW = avgH * 0.03;
+    const rectRadius = avgH * 0.02;
 
     const totalW = bbox.maxX - bbox.minX;
     const totalH = bbox.maxY - bbox.minY;
 
     return (
-        <div className="relative flex-1 w-full h-full flex items-center justify-center p-4 min-h-0 overflow-hidden">
+        <div 
+            className="relative flex-1 w-full h-full flex items-center justify-center p-4 min-h-0 overflow-hidden"
+            onClick={() => setSelectedMonitor(null)}
+        >
             <svg
                 viewBox={`${bbox.minX} ${bbox.minY} ${totalW} ${totalH}`}
                 className="w-full h-full max-h-full max-w-full"
@@ -76,18 +82,15 @@ export function MonitorMap({ monitors, config, onChange }: { monitors: MonitorIn
                     const h = m.monitor_area.bottom - m.monitor_area.top;
                     const isPrimary = config.primary_monitor_id ? m.name === config.primary_monitor_id : m.is_primary;
                     const groupId = config.monitor_groups[m.name] || 0;
-                    const isSelected = selectedMonitor === m.name;
                     const rank = orderedMonitors.findIndex(om => om.name === m.name) + 1;
 
-                    const handleMonitorClick = () => {
+                    const handleMonitorClick = (e: React.MouseEvent) => {
+                        e.stopPropagation();
                         setSelectedMonitor(m.name);
                     };
 
-                    let fillClass = isPrimary ? "fill-blue-900/30" : "fill-slate-800/40";
-                    let strokeClass = isPrimary ? "stroke-blue-500" : "stroke-slate-600";
-                    if (isSelected) {
-                        strokeClass = "stroke-white";
-                    }
+                    let fillClass = "fill-slate-800/40";
+                    let strokeClass = "stroke-slate-600";
                     let groupBadge = null;
 
                     if (groupId > 0 && GROUP_COLORS[groupId]) {
@@ -104,26 +107,26 @@ export function MonitorMap({ monitors, config, onChange }: { monitors: MonitorIn
 
                     return (
                         <g key={i} onClick={handleMonitorClick} className="cursor-pointer hover:opacity-90 transition-opacity">
-                            {/* Screen background */}
+                            {/* Screen background (内側に枠線を収める) */}
                             <rect
-                                x={m.monitor_area.left}
-                                y={m.monitor_area.top}
-                                width={w}
-                                height={h}
-                                rx={w * 0.02}
+                                x={m.monitor_area.left + monitorStrokeW / 2}
+                                y={m.monitor_area.top + monitorStrokeW / 2}
+                                width={Math.max(1, w - monitorStrokeW)}
+                                height={Math.max(1, h - monitorStrokeW)}
+                                rx={Math.max(0, rectRadius - monitorStrokeW / 2)}
                                 className={`transition-colors duration-300 ${fillClass} ${strokeClass}`}
-                                strokeWidth={w * 0.01}
+                                strokeWidth={monitorStrokeW}
                             />
 
                             {/* Screen inner glare */}
                             <rect
-                                x={m.monitor_area.left + w * 0.02}
-                                y={m.monitor_area.top + w * 0.02}
-                                width={w - w * 0.04}
+                                x={m.monitor_area.left + rectRadius}
+                                y={m.monitor_area.top + rectRadius}
+                                width={Math.max(1, w - rectRadius * 2)}
                                 height={h * 0.4}
                                 fill="url(#glare)"
                                 className="opacity-30 pointer-events-none"
-                                rx={w * 0.01}
+                                rx={rectRadius * 0.5}
                             />
 
                             {/* Text centered */}
@@ -181,6 +184,24 @@ export function MonitorMap({ monitors, config, onChange }: { monitors: MonitorIn
                     );
                 })}
 
+                {/* Selected focus ring (重ならないようにすべてのモニターを描画した後に最前面に描画) */}
+                {monitors.filter(m => m.name === selectedMonitor).map(m => {
+                    const w = m.monitor_area.right - m.monitor_area.left;
+                    const h = m.monitor_area.bottom - m.monitor_area.top;
+                    return (
+                        <rect
+                            key={`focus-${m.name}`}
+                            x={m.monitor_area.left - focusStrokeW / 2}
+                            y={m.monitor_area.top - focusStrokeW / 2}
+                            width={Math.max(1, w + focusStrokeW)}
+                            height={Math.max(1, h + focusStrokeW)}
+                            rx={Math.max(0, rectRadius + focusStrokeW / 2)}
+                            className="fill-none stroke-white drop-shadow-md pointer-events-none"
+                            strokeWidth={focusStrokeW}
+                        />
+                    );
+                })}
+
                 <defs>
                     <linearGradient id="glare" x1="0" x2="0" y1="0" y2="1">
                         <stop offset="0%" stopColor="white" stopOpacity="0.1" />
@@ -191,7 +212,10 @@ export function MonitorMap({ monitors, config, onChange }: { monitors: MonitorIn
 
             {/* Editing toolbar for selected monitor */}
             {selectedMonitor && (
-                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-xl flex flex-col items-center space-y-3 z-10 w-max">
+                <div 
+                    className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-800 border border-slate-700 p-4 rounded-xl shadow-xl flex flex-col items-center space-y-3 z-10 w-max"
+                    onClick={(e) => e.stopPropagation()}
+                >
                     <div className="text-white font-medium flex items-center space-x-2">
                         <span>選択中: {monitors.find(m => m.name === selectedMonitor)?.display_number || selectedMonitor}</span>
                         <div className="flex space-x-1 bg-slate-900 rounded p-1">
