@@ -49,6 +49,7 @@ pub fn get_config() -> config::AppConfig {
 pub fn save_config(new_config: config::AppConfig) -> Result<(), String> {
     config::save_config(&new_config);
     hotkey::reload_hotkeys();
+    // 注意: スタートアップ登録の同期はフロントエンドから直接 sync_admin_startup を呼ぶ
     Ok(())
 }
 
@@ -82,6 +83,11 @@ pub fn restart_as_admin() -> Result<(), String> {
 #[tauri::command]
 pub fn sync_admin_startup(enable: bool) -> Result<(), String> {
     admin::sync_admin_startup(enable).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn check_autostart_registered_cmd() -> Result<admin::AutostartStatus, String> {
+    admin::check_autostart_registered()
 }
 
 #[tauri::command]

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { DialogKind } from "./CustomDialog";
 
 /**
@@ -12,6 +13,8 @@ export function AboutTab({
   onShowDialog: (title: string, message: string, kind?: DialogKind) => Promise<boolean>;
 }) {
   const [appLogs, setAppLogs] = useState<string>("Loading logs...");
+  const [appVersion, setAppVersion] = useState<string>("...");
+  const [updateAvailable, setUpdateAvailable] = useState<boolean>(false);
   const logTailRef = useRef<HTMLTextAreaElement>(null);
   const logTimerRef = useRef<number | null>(null);
 
@@ -28,6 +31,31 @@ export function AboutTab({
   useEffect(() => {
     fetchLogs();
     logTimerRef.current = window.setInterval(fetchLogs, 5000);
+
+    // バージョン情報取得とアップデート確認
+    getVersion().then(v => {
+      setAppVersion(v);
+      fetch("https://api.github.com/repos/KotorinChunChun/ChuwitchWindow/releases/latest")
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.tag_name) {
+            const latest = data.tag_name.replace(/^v/, '');
+            const current = v.replace(/^v/, '');
+            const p1 = latest.split('.').map(Number);
+            const p2 = current.split('.').map(Number);
+            let isNewer = false;
+            for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
+              const n1 = p1[i] || 0;
+              const n2 = p2[i] || 0;
+              if (n1 > n2) { isNewer = true; break; }
+              if (n1 < n2) { break; }
+            }
+            if (isNewer) setUpdateAvailable(true);
+          }
+        })
+        .catch(err => console.error("Failed to fetch release info:", err));
+    }).catch(err => console.error("Failed to get app version:", err));
+
     return () => {
       if (logTimerRef.current) window.clearInterval(logTimerRef.current);
     };
@@ -66,11 +94,28 @@ export function AboutTab({
   return (
     <div className="h-full flex flex-col space-y-6">
       <div>
-        <h2 className="text-2xl font-semibold text-white">
-          ChuwitchWindow
-        </h2>
-        <p className="text-slate-400 mt-1">
-          Version 0.2.0 (2026.03.01)
+        <div className="flex items-center gap-3">
+          <h2 className="text-2xl font-semibold text-white">
+            ChuwitchWindow
+          </h2>
+          {updateAvailable && (
+            <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs font-bold rounded-md border border-blue-500/30">
+              アップデートあり
+            </span>
+          )}
+        </div>
+        <p className="text-slate-400 mt-1 flex items-center gap-3">
+          <span>Version {appVersion}</span>
+          <a
+            href="https://github.com/KotorinChunChun/ChuwitchWindow/releases"
+            onClick={(e) => {
+              e.preventDefault();
+              invoke("open_url", { url: "https://github.com/KotorinChunChun/ChuwitchWindow/releases" });
+            }}
+            className="text-blue-400 hover:text-blue-300 text-sm transition-colors font-medium"
+          >
+            【更新履歴】
+          </a>
         </p>
       </div>
       <div className="flex-1 rounded-2xl bg-slate-900/40 border border-slate-800 backdrop-blur-sm p-6 text-sm text-slate-300 space-y-4 flex flex-col min-h-0">

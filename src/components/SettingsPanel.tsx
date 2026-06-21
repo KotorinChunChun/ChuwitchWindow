@@ -20,18 +20,81 @@ export function SettingsPanel({
     onShowDialog: (title: string, message: string, kind?: DialogKind) => Promise<boolean>;
 }) {
     const [isPathRegistered, setIsPathRegistered] = useState(false);
+    const [autostartConflictPath, setAutostartConflictPath] = useState<string | null>(null);
+
+    const checkPathAndAutostart = async (currentConfig: AppConfig) => {
+        try {
+            const isPathReg = await invoke<boolean>("check_path_registered_cmd");
+            setIsPathRegistered(isPathReg);
+
+            // Check actual autostart registration
+            const autoStatus = await invoke<{
+                is_registered: boolean;
+                is_same_path: boolean;
+                registered_path: string | null;
+            }>("check_autostart_registered_cmd");
+
+            let needUpdate = false;
+            let newRunOnStartup = currentConfig.run_on_startup;
+
+            if (autoStatus.is_registered && !autoStatus.is_same_path) {
+                setAutostartConflictPath(autoStatus.registered_path);
+                if (currentConfig.run_on_startup) {
+                    newRunOnStartup = false;
+                    needUpdate = true;
+                }
+            } else {
+                setAutostartConflictPath(null);
+                if (!autoStatus.is_registered && currentConfig.run_on_startup) {
+                    newRunOnStartup = false;
+                    needUpdate = true;
+                } else if (autoStatus.is_registered && autoStatus.is_same_path && !currentConfig.run_on_startup) {
+                    newRunOnStartup = true;
+                    needUpdate = true;
+                }
+            }
+
+            if (needUpdate) {
+                onChange({ ...currentConfig, run_on_startup: newRunOnStartup });
+            }
+            return { autoStatus, wasUpdated: needUpdate, newRunOnStartup };
+        } catch (e) {
+            console.error(e);
+            return null;
+        }
+    };
 
     useEffect(() => {
-        const checkPath = async () => {
-            try {
-                const res = await invoke<boolean>("check_path_registered_cmd");
-                setIsPathRegistered(res);
-            } catch (e) {
-                console.error(e);
+        checkPathAndAutostart(config);
+        // Only run on mount or when admin status changes.
+        // We handle explicit toggle via onChange elsewhere.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isAdmin]);
+
+    const handleRunOnStartupToggle = async (newValue: boolean) => {
+        try {
+            // まずタスクスケジューラの登録/解除を試みる
+            await invoke("sync_admin_startup", { enable: newValue });
+
+            // 成功した場合のみ設定を更新
+            const nextConfig = { ...config, run_on_startup: newValue };
+            onChange(nextConfig);
+
+            // 登録完了後に実際の状態を再確認
+            await checkPathAndAutostart(nextConfig);
+
+            if (newValue) {
+                await onShowDialog("完了", "自動起動を登録しました。", "success");
+            } else {
+                await onShowDialog("完了", "自動起動を解除しました。", "success");
             }
-        };
-        checkPath();
-    }, []);
+        } catch (e) {
+            // 失敗した場合でも実際の状態を確認して同期する
+            console.error("自動起動の設定に失敗:", e);
+            await checkPathAndAutostart(config);
+            await onShowDialog("エラー", `自動起動の${newValue ? "登録" : "解除"}に失敗しました。\n\n${e}`, "error");
+        }
+    };
 
     const updateConfig = (updates: Partial<AppConfig>) => {
         onChange({ ...config, ...updates });
@@ -50,8 +113,16 @@ export function SettingsPanel({
                                 label="PC起動時に自動実行 (スタートアップ)"
                                 description="Schtasks（タスクスケジューラ）を用いてログイン時に自動実行します"
                                 checked={config.run_on_startup}
-                                onChange={(v) => updateConfig({ run_on_startup: v })}
+                                disabled={!isAdmin}
+                                onChange={handleRunOnStartupToggle}
                             />
+                            
+                            {autostartConflictPath && (
+                                <div className="flex items-start p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-200 text-sm mt-2">
+                                    <ShieldAlert className="w-5 h-5 mr-3 flex-shrink-0 text-red-400" />
+                                    <p>ChuwitchWindow_AutoStart は別のパスのEXEが登録済みです。<br/>パス：{autostartConflictPath}</p>
+                                </div>
+                            )}
 
                             {!isAdmin && config.run_on_startup && (
                                 <div className="flex items-start p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-200 text-base">
@@ -282,17 +353,19 @@ export function SettingsPanel({
     );
 }
 
-function ToggleOption({ label, description, checked, onChange }: { label: string; description?: string; checked: boolean; onChange: (v: boolean) => void }) {
+function ToggleOption({ label, description, checked, disabled, onChange }: { label: string; description?: string; checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
     return (
-        <div className="flex items-center justify-between p-4 bg-slate-900/50 rounded-xl border border-slate-800">
+        <div className={cn("flex items-center justify-between p-4 bg-slate-900/50 rounded-xl border border-slate-800", disabled && "opacity-50 grayscale")}>
             <div className="pr-4">
                 <div className="text-base font-medium text-slate-200">{label}</div>
                 {description && <div className="text-sm text-slate-500 mt-1">{description}</div>}
             </div>
             <button
-                onClick={() => onChange(!checked)}
+                disabled={disabled}
+                onClick={() => !disabled && onChange(!checked)}
                 className={cn(
-                    "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer",
+                    "relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900",
+                    disabled ? "cursor-not-allowed" : "cursor-pointer",
                     checked ? "bg-blue-500" : "bg-slate-700"
                 )}
             >
@@ -306,6 +379,7 @@ function ToggleOption({ label, description, checked, onChange }: { label: string
         </div>
     );
 }
+
 
 function HotkeyInput({
     label,

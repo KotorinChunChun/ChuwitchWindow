@@ -213,6 +213,7 @@ pub fn run() {
             commands::is_user_an_admin,
             commands::restart_as_admin,
             commands::sync_admin_startup,
+            commands::check_autostart_registered_cmd,
             commands::get_all_monitors_cmd,
             commands::trigger_action,
             commands::check_hotkey_conflict_cmd,
