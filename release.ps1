@@ -77,7 +77,9 @@ if (Test-Path "README.md") {
 # 5. ZIP 圧縮
 Write-Host "Compressing to ZIP..." -ForegroundColor Yellow
 if (Test-Path $zipFile) { Remove-Item $zipFile }
-Compress-Archive -Path "$releaseDir/*" -DestinationPath $zipFile
+Write-Host "Waiting for file locks to clear..." -ForegroundColor Yellow
+Start-Sleep -Seconds 3
+Compress-Archive -Path "$releaseDir/*" -DestinationPath $zipFile -ErrorAction Stop
 
 # ZIP作成後、一時フォルダを削除
 if (Test-Path $releaseDir) {
@@ -89,17 +91,43 @@ Write-Host "Release package created at: $zipFile" -ForegroundColor Green
 # 6. GitHub Release への追加 (gh CLI がある場合)
 $ghAvailable = Get-Command gh -ErrorAction SilentlyContinue
 if ($ghAvailable) {
-    Write-Host "Checking GitHub CLI and creating release..." -ForegroundColor Cyan
-    # タグが存在するか確認、なければ作成
+    Write-Host "GitHub CLI の状態とリリースの存在を確認中..." -ForegroundColor Cyan
     $tagName = "v$version"
-    gh release create $tagName $zipFile $setupDestPath --title "Release $tagName" --notes "Automated release for $tagName" --overwrite
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Successfully created GitHub release: $tagName" -ForegroundColor Green
+    
+    # 既存のリリースがあるか確認
+    $null = gh release view $tagName 2>&1
+    $releaseExists = ($LASTEXITCODE -eq 0)
+
+    if ($releaseExists) {
+        Write-Host "警告: GitHub リリース $tagName は既に存在します。" -ForegroundColor Yellow
+        $overwrite = Read-Host "既存のリリースのファイルを上書きして更新しますか？ (y/N)"
+        if ($overwrite -match '^[Yy]$') {
+            Write-Host "アセットを上書きアップロード中..." -ForegroundColor Yellow
+            gh release upload $tagName $zipFile $setupDestPath --clobber
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "GitHub リリースアセットを正常に更新しました: $tagName" -ForegroundColor Green
+            }
+            else {
+                Write-Warning "GitHub リリースアセットの更新に失敗しました。"
+            }
+        }
+        else {
+            Write-Host "リリースの更新をスキップしました。" -ForegroundColor Gray
+        }
     }
     else {
-        Write-Warning "GitHub リリースの作成に失敗しました。認証（gh auth login）を確認してください。"
+        Write-Host "新規リリースを作成中..." -ForegroundColor Yellow
+        gh release create $tagName $zipFile $setupDestPath --title "Release $tagName" --notes "Automated release for $tagName"
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "GitHub リリースを正常に作成しました: $tagName" -ForegroundColor Green
+        }
+        else {
+            Write-Warning "GitHub リリースの作成に失敗しました。認証（gh auth login）を確認してください。"
+        }
     }
 }
 else {
     Write-Host "GitHub CLI (gh) が見つからないため、GitHub へのアップロードはスキップしました。" -ForegroundColor Gray
 }
+
+
