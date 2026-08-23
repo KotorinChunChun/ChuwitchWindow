@@ -19,6 +19,9 @@ pub struct WindowUIData {
     pub process_name: String,
     pub class_name: String,
     pub is_pinned: bool,
+    pub is_fullscreen: bool,
+    pub is_minimized: bool,
+    pub is_maximized: bool,
     pub style: u32,
     pub ex_style: u32,
 }
@@ -123,7 +126,7 @@ pub fn set_recording_state_cmd(is_recording: bool) {
 #[tauri::command]
 pub fn get_window_list_cmd() -> Vec<WindowUIData> {
     let mut result = Vec::new();
-    let wins = crate::window::get_target_windows(false, false); 
+    let wins = crate::window::get_target_windows();
     
     for w in wins {
         result.push(WindowUIData {
@@ -132,6 +135,9 @@ pub fn get_window_list_cmd() -> Vec<WindowUIData> {
             process_name: w.process_name,
             class_name: w.class_name,
             is_pinned: pin::is_pinned(w.hwnd),
+            is_fullscreen: w.is_fullscreen,
+            is_minimized: w.is_minimized,
+            is_maximized: w.is_maximized,
             style: w.style,
             ex_style: w.ex_style,
         });
@@ -178,7 +184,7 @@ pub fn export_config_cmd(path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn import_config_cmd(path: String) -> Result<config::AppConfig, String> {
     let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let new_config: config::AppConfig = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    let (new_config, _) = config::parse_config_json(&json).map_err(|e| e.to_string())?;
     config::save_config(&new_config);
     Ok(new_config)
 }

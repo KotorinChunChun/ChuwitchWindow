@@ -13,6 +13,58 @@ import {
     getNodeByPath,
 } from "../lib/ruleUtils";
 
+type FormCondition = { enabled: boolean; operator: string; value: string };
+type FormConditions = Record<string, FormCondition>;
+
+const CONDITION_FIELDS = [
+    { key: "process_name", label: "プロセス", kind: "string" },
+    { key: "class_name", label: "クラス", kind: "string" },
+    { key: "title", label: "タイトル", kind: "string" },
+    { key: "style", label: "スタイル", kind: "string" },
+    { key: "ex_style", label: "拡張スタイル", kind: "string" },
+    { key: "is_fullscreen", label: "全画面", kind: "boolean" },
+    { key: "is_minimized", label: "最小化", kind: "boolean" },
+    { key: "is_maximized", label: "最大化", kind: "boolean" },
+] as const;
+
+const STRING_OPERATORS = [
+    { value: "equals", label: "一致 (=)" },
+    { value: "not_equals", label: "不一致 (≠)" },
+    { value: "contains", label: "含む" },
+    { value: "not_contains", label: "含まない" },
+    { value: "starts_with", label: "始まる" },
+    { value: "ends_with", label: "終わる" },
+    { value: "wildcard", label: "WC一致 (*, ?)" },
+    { value: "not_wildcard", label: "WC不一致" },
+] as const;
+
+const BOOLEAN_OPERATORS = [
+    { value: "equals", label: "一致 (=)" },
+    { value: "not_equals", label: "不一致 (≠)" },
+] as const;
+
+const TREE_OPERATOR_LABELS: Record<string, string> = {
+    equals: "=",
+    not_equals: "≠",
+    contains: "含む",
+    not_contains: "含まない",
+    starts_with: "前方",
+    ends_with: "後方",
+    wildcard: "glob",
+    not_wildcard: "非glob",
+};
+
+const createDefaultFormConditions = (): FormConditions => ({
+    process_name: { enabled: true, operator: "equals", value: "" },
+    class_name: { enabled: false, operator: "equals", value: "" },
+    title: { enabled: false, operator: "contains", value: "" },
+    style: { enabled: false, operator: "equals", value: "" },
+    ex_style: { enabled: false, operator: "equals", value: "" },
+    is_fullscreen: { enabled: false, operator: "equals", value: "true" },
+    is_minimized: { enabled: false, operator: "equals", value: "true" },
+    is_maximized: { enabled: false, operator: "equals", value: "true" },
+});
+
 function RuleTreeEditor({ 
   node, 
   onChange, 
@@ -118,7 +170,7 @@ function RuleTreeEditor({
           {node.conditions && node.conditions.map((cond, i) => (
             <div key={i} className="text-xs text-slate-300 flex items-center space-x-1.5 truncate">
               <span className="font-mono bg-slate-800 px-1 py-0.5 rounded text-[10px] text-blue-300 min-w-[4.5rem] text-center">{cond.field}</span>
-              <span className="text-slate-500 text-[10px] w-8 text-center">{cond.operator === "equals" ? "=" : cond.operator === "contains" ? "含む" : cond.operator === "starts_with" ? "始" : "終"}</span>
+              <span className="text-slate-500 text-[10px] min-w-10 text-center">{TREE_OPERATOR_LABELS[cond.operator] ?? cond.operator}</span>
               <span className="font-mono text-emerald-300 text-[11px] bg-slate-950 px-1 py-0.5 rounded truncate">"{cond.value}"</span>
             </div>
           ))}
@@ -166,13 +218,7 @@ export function ExclusionPanel({
     const [formMode, setFormMode] = useState<"ADD" | "EDIT" | "ADD_GROUP">("ADD");
 
     // フォーム入力の状態管理
-    const [formConditions, setFormConditions] = useState<Record<string, {enabled: boolean, operator: string, value: string}>>({
-        process_name: { enabled: true, operator: "equals", value: "" },
-        class_name: { enabled: false, operator: "equals", value: "" },
-        title: { enabled: false, operator: "contains", value: "" },
-        style: { enabled: false, operator: "equals", value: "" },
-        ex_style: { enabled: false, operator: "equals", value: "" },
-    });
+    const [formConditions, setFormConditions] = useState<FormConditions>(createDefaultFormConditions);
 
     const rootNode = parseRules(jsonInput);
 
@@ -290,6 +336,9 @@ export function ExclusionPanel({
                 title: { ...prev.title, value: win.title, enabled: false },
                 style: { ...prev.style, value: win.style.toString(16).toUpperCase().padStart(8, '0'), enabled: false },
                 ex_style: { ...prev.ex_style, value: win.ex_style.toString(16).toUpperCase().padStart(8, '0'), enabled: false },
+                is_fullscreen: { ...prev.is_fullscreen, value: String(win.is_fullscreen), enabled: false },
+                is_minimized: { ...prev.is_minimized, value: String(win.is_minimized), enabled: false },
+                is_maximized: { ...prev.is_maximized, value: String(win.is_maximized), enabled: false },
             }));
             if (formMode !== "EDIT") {
                 setFormMode("ADD");
@@ -302,16 +351,13 @@ export function ExclusionPanel({
         if (node.type === "rule") {
             setFormMode("EDIT");
             // Populate form
-            const newForm = {
-                process_name: { enabled: false, operator: "equals", value: "" },
-                class_name: { enabled: false, operator: "equals", value: "" },
-                title: { enabled: false, operator: "contains", value: "" },
-                style: { enabled: false, operator: "equals", value: "" },
-                ex_style: { enabled: false, operator: "equals", value: "" },
-            };
+            const newForm = createDefaultFormConditions();
+            Object.values(newForm).forEach(condition => {
+                condition.enabled = false;
+            });
             node.conditions.forEach(cond => {
-                if (newForm[cond.field as keyof typeof newForm]) {
-                    newForm[cond.field as keyof typeof newForm] = {
+                if (newForm[cond.field]) {
+                    newForm[cond.field] = {
                         enabled: true,
                         operator: cond.operator,
                         value: cond.value
@@ -477,7 +523,7 @@ export function ExclusionPanel({
                 </div>
 
                 {/* 2. 条件を編集 - ウィンドウから情報を取得 / 条件を設定 */}
-                <div className="flex-1 min-w-[320px] flex flex-col min-h-0 bg-slate-950/40 rounded-lg border border-slate-800 p-4 overflow-y-auto">
+                <div className="flex-1 min-w-[400px] flex flex-col min-h-0 bg-slate-950/40 rounded-lg border border-slate-800 p-4 overflow-y-auto">
                     
                     <h4 className="text-sm font-medium text-slate-300 mb-3 border-b border-slate-800 pb-1 flex-none">① ウィンドウから情報を取得</h4>
                     
@@ -507,15 +553,15 @@ export function ExclusionPanel({
                     <h4 className="text-sm font-medium text-slate-300 mb-3 border-b border-slate-800 pb-1 flex-none">
                         ② 条件を設定 <span className="text-xs text-blue-400 font-normal ml-2">{formMode === "EDIT" ? "(編集中)" : "(新規追加)"}</span>
                     </h4>
-                    
+
+                    <p className="text-[11px] text-slate-500 mb-2">
+                        ワイルドカードでは <code className="text-blue-300">*</code> が0文字以上、<code className="text-blue-300">?</code> が任意の1文字に一致します（大文字・小文字は区別しません）。
+                    </p>
+
                     <div className="space-y-2 mb-4 bg-slate-900/30 p-3 rounded-lg border border-slate-800 flex-none">
-                        {[
-                            { key: "process_name", label: "プロセス名" },
-                            { key: "class_name", label: "クラス名" },
-                            { key: "title", label: "タイトル" },
-                            { key: "style", label: "スタイル" },
-                            { key: "ex_style", label: "拡張スタイル" },
-                        ].map(f => (
+                        {CONDITION_FIELDS.map(f => {
+                            const operators = f.kind === "boolean" ? BOOLEAN_OPERATORS : STRING_OPERATORS;
+                            return (
                             <div key={f.key} className="flex items-center space-x-2">
                                 <input 
                                     type="checkbox" 
@@ -523,33 +569,45 @@ export function ExclusionPanel({
                                     onChange={e => setFormConditions(p => ({...p, [f.key]: {...p[f.key], enabled: e.target.checked}}))}
                                     className="flex-none w-3.5 h-3.5 bg-slate-900 border-slate-700 rounded focus:ring-blue-500 cursor-pointer"
                                 />
-                                <label 
-                                    className="flex-none w-16 text-xs text-slate-300 font-medium truncate cursor-pointer" 
+                                <label
+                                    className="flex-none w-20 text-xs text-slate-300 font-medium truncate cursor-pointer"
                                     title={f.label}
                                     onClick={() => setFormConditions(p => ({...p, [f.key]: {...p[f.key], enabled: !p[f.key].enabled}}))}
                                 >{f.label}</label>
                                 <select 
-                                    className="flex-none bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-slate-200 focus:outline-none focus:border-blue-500 text-[11px] w-20 disabled:opacity-50 cursor-pointer"
+                                    className="flex-none bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-slate-200 focus:outline-none focus:border-blue-500 text-[11px] w-24 disabled:opacity-50 cursor-pointer"
                                     value={formConditions[f.key].operator}
                                     onChange={e => setFormConditions(p => ({...p, [f.key]: {...p[f.key], operator: e.target.value}}))}
                                     disabled={!formConditions[f.key].enabled}
                                 >
-                                    <option value="equals">一致 (=)</option>
-                                    <option value="contains">含む (*)</option>
-                                    <option value="starts_with">始まる</option>
-                                    <option value="ends_with">終わる</option>
+                                    {operators.map(operator => (
+                                        <option key={operator.value} value={operator.value}>{operator.label}</option>
+                                    ))}
                                 </select>
-                                <input 
-                                    type="text" 
-                                    value={formConditions[f.key].value} 
-                                    onChange={e => setFormConditions(p => ({...p, [f.key]: {...p[f.key], value: e.target.value}}))}
-                                    className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-blue-500 text-xs disabled:opacity-50"
-                                    placeholder="値を入力"
-                                    disabled={!formConditions[f.key].enabled}
-                                    spellCheck={false}
-                                />
+                                {f.kind === "boolean" ? (
+                                    <select
+                                        value={formConditions[f.key].value}
+                                        onChange={e => setFormConditions(p => ({...p, [f.key]: {...p[f.key], value: e.target.value}}))}
+                                        className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-blue-500 text-xs disabled:opacity-50 cursor-pointer"
+                                        disabled={!formConditions[f.key].enabled}
+                                    >
+                                        <option value="true">はい</option>
+                                        <option value="false">いいえ</option>
+                                    </select>
+                                ) : (
+                                    <input
+                                        type="text"
+                                        value={formConditions[f.key].value}
+                                        onChange={e => setFormConditions(p => ({...p, [f.key]: {...p[f.key], value: e.target.value}}))}
+                                        className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-blue-500 text-xs disabled:opacity-50"
+                                        placeholder={f.key === "process_name" ? "例: mstsc*.exe" : "値を入力"}
+                                        disabled={!formConditions[f.key].enabled}
+                                        spellCheck={false}
+                                    />
+                                )}
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
 
                     <div className="flex flex-col space-y-2 flex-none">
@@ -568,13 +626,7 @@ export function ExclusionPanel({
                                 onClick={() => {
                                     setFormMode("ADD");
                                     setSelectedPath([]);
-                                    setFormConditions({
-                                        process_name: { enabled: true, operator: "equals", value: "" },
-                                        class_name: { enabled: false, operator: "equals", value: "" },
-                                        title: { enabled: false, operator: "contains", value: "" },
-                                        style: { enabled: false, operator: "equals", value: "" },
-                                        ex_style: { enabled: false, operator: "equals", value: "" },
-                                    });
+                                    setFormConditions(createDefaultFormConditions());
                                 }}
                                 className="w-full px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-medium transition-colors text-slate-400 cursor-pointer"
                             >
@@ -624,6 +676,9 @@ export function ExclusionPanel({
                                                 <div className="font-medium truncate">{w.process_name} <span className="text-[10px] text-slate-500 ml-1">{w.title}</span></div>
                                                 <div className="flex gap-1 mt-0.5 truncate overflow-hidden">
                                                     <span className="text-[9px] bg-slate-800 text-slate-400 px-1 rounded truncate flex-shrink min-w-0">{w.class_name}</span>
+                                                    {w.is_fullscreen && <span className="text-[9px] bg-purple-500/15 text-purple-300 px-1 rounded flex-none">全画面</span>}
+                                                    {w.is_minimized && <span className="text-[9px] bg-amber-500/15 text-amber-300 px-1 rounded flex-none">最小化</span>}
+                                                    {w.is_maximized && <span className="text-[9px] bg-cyan-500/15 text-cyan-300 px-1 rounded flex-none">最大化</span>}
                                                 </div>
                                             </div>
                                             <div className="flex-shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded">

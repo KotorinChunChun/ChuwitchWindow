@@ -62,7 +62,7 @@ pub fn handle_rotate(app: &tauri::AppHandle, clockwise: bool) {
         }
     });
     
-    let windows: Vec<WindowInfo> = get_target_windows(config.ignore_fullscreen, config.exclude_minimized)
+    let windows: Vec<WindowInfo> = get_target_windows()
         .into_iter()
         .filter(|w| {
             if crate::pin::is_pinned(w.hwnd) {
@@ -207,7 +207,7 @@ pub fn handle_swap_target(app: &tauri::AppHandle, target_num: u32) {
 
     let parsed_rules = crate::rule::parse_rules(&config.exclusion_rules);
 
-    let windows: Vec<WindowInfo> = get_target_windows(config.ignore_fullscreen, config.exclude_minimized)
+    let windows: Vec<WindowInfo> = get_target_windows()
         .into_iter()
         .filter(|w| {
             if crate::pin::is_pinned(w.hwnd) {
@@ -276,7 +276,7 @@ pub fn handle_escape(app: &tauri::AppHandle) {
     
     let parsed_rules = crate::rule::parse_rules(&config.exclusion_rules);
     
-    let windows: Vec<WindowInfo> = get_target_windows(config.ignore_fullscreen, config.exclude_minimized)
+    let windows: Vec<WindowInfo> = get_target_windows()
         .into_iter()
         .filter(|w| !crate::pin::is_pinned(w.hwnd))
         .filter(|w| !crate::rule::is_excluded(w, &parsed_rules)) // v0.2: ルール除外
@@ -315,7 +315,7 @@ pub fn handle_gather(app: &tauri::AppHandle) {
     
     let parsed_rules = crate::rule::parse_rules(&config.exclusion_rules);
     
-    let windows: Vec<WindowInfo> = get_target_windows(config.ignore_fullscreen, config.exclude_minimized)
+    let windows: Vec<WindowInfo> = get_target_windows()
         .into_iter()
         .filter(|w| !crate::pin::is_pinned(w.hwnd))
         .filter(|w| !crate::rule::is_excluded(w, &parsed_rules)) // v0.2: ルール除外

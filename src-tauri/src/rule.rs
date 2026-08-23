@@ -3,8 +3,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RuleCondition {
-    pub field: String,    // "process_name", "class_name", "title", "style", "ex_style"
-    pub operator: String, // "equals", "contains", "starts_with", "ends_with"
+    /// 対象フィールド。
+    /// 文字列属性に加えて、ウィンドウ状態（is_fullscreen など）も文字列として比較する。
+    pub field: String,
+    /// 比較演算子。wildcard / not_wildcard では `*` と `?` を使用できる。
+    pub operator: String,
     pub value: String,
 }
 
@@ -85,31 +88,73 @@ fn match_node(win: &WindowInfo, node: &RuleNode) -> bool {
             if conditions.is_empty() { return false; }
             // ルール内の条件は常に AND
             for cond in conditions {
-                let style_hex = format!("{:08X}", win.style);
-                let ex_style_hex = format!("{:08X}", win.ex_style);
-                
-                let field_val = match cond.field.as_str() {
-                    "process_name" => &win.process_name,
-                    "class_name" => &win.class_name,
-                    "title" => &win.title,
-                    "style" => &style_hex,
-                    "ex_style" => &ex_style_hex,
-                    _ => "",
+                let Some(field_val) = field_value(win, &cond.field) else {
+                    // 未知のフィールドを否定演算子で真にしないため、常に不一致とする。
+                    return false;
                 };
 
-                let matched = match cond.operator.as_str() {
-                    "equals" => field_val == cond.value,
-                    "contains" => field_val.contains(&cond.value),
-                    "starts_with" => field_val.starts_with(&cond.value),
-                    "ends_with" => field_val.ends_with(&cond.value),
-                    _ => false,
-                };
+                let matched = match_condition(&field_val, &cond.operator, &cond.value);
 
                 if !matched { return false; } // ANDなので、一つでも外れたらルール不成立
             }
             true
         }
     }
+}
+
+fn field_value(win: &WindowInfo, field: &str) -> Option<String> {
+    match field {
+        "process_name" => Some(win.process_name.clone()),
+        "class_name" => Some(win.class_name.clone()),
+        "title" => Some(win.title.clone()),
+        "style" => Some(format!("{:08X}", win.style)),
+        "ex_style" => Some(format!("{:08X}", win.ex_style)),
+        "is_fullscreen" => Some(win.is_fullscreen.to_string()),
+        "is_minimized" => Some(win.is_minimized.to_string()),
+        "is_maximized" => Some(win.is_maximized.to_string()),
+        _ => None,
+    }
+}
+
+fn match_condition(field_value: &str, operator: &str, expected: &str) -> bool {
+    match operator {
+        "equals" => field_value == expected,
+        "not_equals" => field_value != expected,
+        "contains" => field_value.contains(expected),
+        "not_contains" => !field_value.contains(expected),
+        "starts_with" => field_value.starts_with(expected),
+        "ends_with" => field_value.ends_with(expected),
+        "wildcard" => wildcard_match(field_value, expected),
+        "not_wildcard" => !wildcard_match(field_value, expected),
+        _ => false,
+    }
+}
+
+/// Windows のファイル選択で馴染みのある glob 形式で比較する。
+/// `*` は0文字以上、`?` は任意の1文字に一致し、大文字・小文字は区別しない。
+fn wildcard_match(value: &str, pattern: &str) -> bool {
+    let value: Vec<char> = value.to_lowercase().chars().collect();
+    let pattern: Vec<char> = pattern.to_lowercase().chars().collect();
+    let mut previous = vec![false; value.len() + 1];
+    previous[0] = true;
+
+    for token in pattern {
+        let mut current = vec![false; value.len() + 1];
+        if token == '*' {
+            current[0] = previous[0];
+        }
+
+        for index in 1..=value.len() {
+            current[index] = match token {
+                '*' => previous[index] || current[index - 1],
+                '?' => previous[index - 1],
+                literal => previous[index - 1] && value[index - 1] == literal,
+            };
+        }
+        previous = current;
+    }
+
+    previous[value.len()]
 }
 
 #[cfg(test)]
@@ -319,6 +364,84 @@ mod tests {
                 RuleCondition { field: "title".to_string(), operator: "starts_with".to_string(), value: "World".to_string() }
             ]
         };
+        assert!(!match_node(&win, &rule));
+    }
+
+    #[test]
+    fn test_operator_wildcard_is_case_insensitive() {
+        let win = create_mock_window("MSTSC.EXE", "TscShellContainerClass", "Remote Desktop");
+        let rule = RuleNode::Rule {
+            conditions: vec![
+                RuleCondition { field: "process_name".to_string(), operator: "wildcard".to_string(), value: "mstsc*.exe".to_string() }
+            ]
+        };
+        assert!(match_node(&win, &rule));
+    }
+
+    #[test]
+    fn test_operator_wildcard_question_mark() {
+        assert!(wildcard_match("app1.exe", "app?.exe"));
+        assert!(!wildcard_match("app12.exe", "app?.exe"));
+    }
+
+    #[test]
+    fn test_operator_not_wildcard_supports_rdp_exception() {
+        let fullscreen_rdp = WindowInfo {
+            is_fullscreen: true,
+            ..create_mock_window("mstsc.exe", "TscShellContainerClass", "Remote Desktop")
+        };
+        let fullscreen_game = WindowInfo {
+            is_fullscreen: true,
+            ..create_mock_window("game.exe", "GameWindow", "Game")
+        };
+        let rule = RuleNode::Rule {
+            conditions: vec![
+                RuleCondition { field: "is_fullscreen".to_string(), operator: "equals".to_string(), value: "true".to_string() },
+                RuleCondition { field: "process_name".to_string(), operator: "not_wildcard".to_string(), value: "mstsc*.exe".to_string() },
+            ],
+        };
+
+        assert!(!match_node(&fullscreen_rdp, &rule));
+        assert!(match_node(&fullscreen_game, &rule));
+    }
+
+    #[test]
+    fn test_boolean_window_state_fields() {
+        let win = WindowInfo {
+            is_minimized: true,
+            is_maximized: false,
+            ..create_mock_window("test.exe", "TestClass", "Test")
+        };
+        let minimized_rule = RuleNode::Rule {
+            conditions: vec![RuleCondition {
+                field: "is_minimized".to_string(),
+                operator: "equals".to_string(),
+                value: "true".to_string(),
+            }],
+        };
+        let maximized_rule = RuleNode::Rule {
+            conditions: vec![RuleCondition {
+                field: "is_maximized".to_string(),
+                operator: "equals".to_string(),
+                value: "true".to_string(),
+            }],
+        };
+
+        assert!(match_node(&win, &minimized_rule));
+        assert!(!match_node(&win, &maximized_rule));
+    }
+
+    #[test]
+    fn test_unknown_field_never_matches_negative_operator() {
+        let win = create_mock_window("test.exe", "TestClass", "Test");
+        let rule = RuleNode::Rule {
+            conditions: vec![RuleCondition {
+                field: "unknown".to_string(),
+                operator: "not_equals".to_string(),
+                value: "anything".to_string(),
+            }],
+        };
+
         assert!(!match_node(&win, &rule));
     }
 

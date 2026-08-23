@@ -76,6 +76,8 @@
 2. 次に設定画面を開き、「除外リスト」タブを開きます。
 3. すでにピン留めされているウィンドウが提案されるため、そのままルールに追加することで手軽に除外リストへ登録できます。
 
+プロセス名・クラス名・タイトル等に加え、フルスクリーン・最小化・最大化の状態も条件にできます。文字列条件では `*`（0文字以上）と `?`（任意の1文字）のワイルドカードが使用できます。既定では一般的なフルスクリーンウィンドウと最小化ウィンドウを除外し、`mstsc*.exe` のフルスクリーンRDPは移動対象に含めるルールが登録されます。
+
 ### 【v0.2】CLIからの実行（外部アプリ連携）
 
 Stream Deckなどのマクロパッドや自作スクリプトから、実行時引数をつけて呼び出すことで連携操作が可能です。
@@ -114,8 +116,8 @@ ChuwitchWindow --swap 1 2
 設定画面は4つのタブで構成されています。
 
 - **モニター構成**: モニターの物理配置をグラフィカルに表示。クリックでグループ色を変更し、同じ色のモニター間でウィンドウを一斉交換できます。
-- **設定・常駐**: ショートカットキーの変更、スタートアップ登録、最小化ウィンドウの対象外設定【v0.2】、動作設定を行います。
-- **除外リスト**【v0.2】: 「Discord」や「OBS」など、常に移動対象から外すアプリをプロセス名等で条件登録し、一連の動きから除外します。
+- **設定・常駐**: ショートカットキーの変更、スタートアップ登録、動作設定を行います。
+- **除外リスト**【v0.2】: 「Discord」や「OBS」など、常に移動対象から外すアプリをプロセス名・ウィンドウ状態・ワイルドカード等の条件で登録します。
 - **アプリについて**: バージョン情報、公開場所(GitHub)へのリンク、設定ファイルのインポート/エクスポート【v0.2】、CLI用Pathの追加登録【v0.2】があります。
 
 設定は `%APPDATA%\com.kotorichun\chuwitchwindow\config.json` に自動保存されます。
@@ -133,8 +135,7 @@ ChuwitchWindow --swap 1 2
 - 自動起動の登録ができます。
 - ショートカットキーの設定ができます。
 - グループ内での入れ替えを行うかモード切替ができます。
-- フルクリーンアプリの扱いを変更できます。
-- 【v0.2】最小化されたウィンドウを移動対象から除外するか設定できます。
+- フルスクリーン・最小化・最大化ウィンドウの扱いは「除外リスト」でルールとして変更できます。
 
 ![](https://private-user-images.githubusercontent.com/55196383/553030503-3193eb73-6f15-4cf4-8a7e-34a94d00571a.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzE3NjMzODAsIm5iZiI6MTc3MTc2MzA4MCwicGF0aCI6Ii81NTE5NjM4My81NTMwMzA1MDMtMzE5M2ViNzMtNmYxNS00Y2Y0LThhN2UtMzRhOTRkMDA1NzFhLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMjIlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjIyVDEyMjQ0MFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWFlMjQ1M2E4NzU0ZjkxMjAwMDE2OGM1ZDMwZDU2NmM1YjBlNWNhZDg2NjZkMTZlMDRiYWNmMGZmYTY5ZDRkMGEmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.c3UaAfmygZkI9oXZvHI-M5OhtbiElO72KS3M3mrNlXA)
 

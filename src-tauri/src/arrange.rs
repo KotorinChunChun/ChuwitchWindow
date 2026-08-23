@@ -63,7 +63,7 @@ pub fn handle_arrange(app: &tauri::AppHandle, arrange_type: ArrangeType) {
     let parsed_rules = crate::rule::parse_rules(&config.exclusion_rules);
 
     // 1. 全ウィンドウを取得
-    let all_windows = crate::window::get_target_windows(config.ignore_fullscreen, config.exclude_minimized);
+    let all_windows = crate::window::get_target_windows();
     info!("[arrange] get_target_windows() で取得したウィンドウ数: {}", all_windows.len());
     
     // 2. ターゲットモニター上のウィンドウを「固定（障害物）」と「移動対象」に分ける

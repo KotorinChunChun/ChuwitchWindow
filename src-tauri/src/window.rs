@@ -42,12 +42,11 @@ struct EnumState {
     windows: Vec<WindowInfo>,
     vdm: Option<IVirtualDesktopManager>,
     monitors: Vec<crate::monitor::MonitorInfo>,
-    ignore_fullscreen: bool,
-    /// v0.2: 最小化ウィンドウを移動対象から除外するか
-    exclude_minimized: bool,
 }
 
-pub fn get_target_windows(ignore_fullscreen: bool, exclude_minimized: bool) -> Vec<WindowInfo> {
+/// OS上の移動候補ウィンドウを列挙する。
+/// フルスクリーンや最小化などの利用者設定は、列挙後に除外ルールで評価する。
+pub fn get_target_windows() -> Vec<WindowInfo> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
     }
@@ -59,8 +58,6 @@ pub fn get_target_windows(ignore_fullscreen: bool, exclude_minimized: bool) -> V
         windows: Vec::new(),
         vdm,
         monitors: crate::monitor::get_all_monitors(),
-        ignore_fullscreen,
-        exclude_minimized,
     });
 
     unsafe {
@@ -179,15 +176,6 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
             && rect.bottom >= m.monitor_area.bottom
     }) && (!has_caption && !has_thickframe);
 
-    if state.ignore_fullscreen && is_fullscreen {
-        return BOOL(1);
-    }
-
-    // v0.2: 最小化ウィンドウの除外 (SPEC 2-5)
-    if state.exclude_minimized && is_minimized {
-        return BOOL(1);
-    }
-
     // --- v0.2: プロセス名を取得 ---
     let process_name = {
         let mut pid: u32 = 0;
@@ -296,30 +284,7 @@ pub fn move_window(
     use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, ShowWindow, SWP_NOACTIVATE, HWND_TOP, SW_RESTORE, SW_MAXIMIZE};
 
     let hwnd = HWND(win.hwnd);
-    let window_rect = &win.rect;
-    
-    let (new_x, new_y, new_w, new_h) = if let Some(snap) = apply_snap_correction(window_rect, &src_monitor.work_area, &dest_monitor.work_area) {
-        snap
-    } else {
-        // Fallback to ratio scaling
-        let src_w = src_monitor.work_area.right - src_monitor.work_area.left;
-        let src_h = src_monitor.work_area.bottom - src_monitor.work_area.top;
-        let win_w = window_rect.right - window_rect.left;
-        let win_h = window_rect.bottom - window_rect.top;
-        
-        let ratio_x = (dest_monitor.work_area.right - dest_monitor.work_area.left) as f32 / src_w as f32;
-        let ratio_y = (dest_monitor.work_area.bottom - dest_monitor.work_area.top) as f32 / src_h as f32;
-        
-        let rel_x = window_rect.left - src_monitor.work_area.left;
-        let rel_y = window_rect.top - src_monitor.work_area.top;
-        
-        (
-            dest_monitor.work_area.left + (rel_x as f32 * ratio_x).round() as i32,
-            dest_monitor.work_area.top + (rel_y as f32 * ratio_y).round() as i32,
-            (win_w as f32 * ratio_x).round() as i32,
-            (win_h as f32 * ratio_y).round() as i32
-        )
-    };
+    let (new_x, new_y, new_w, new_h) = calculate_target_rect(win, src_monitor, dest_monitor);
 
     unsafe {
         let insert_after = if hwnd_insert_after == 0 {
@@ -327,7 +292,7 @@ pub fn move_window(
         } else {
             HWND(hwnd_insert_after)
         };
-        
+
         if win.is_maximized {
             let _ = ShowWindow(hwnd, SW_RESTORE);
         }
@@ -348,10 +313,103 @@ pub fn move_window(
     }
 }
 
+fn calculate_target_rect(
+    win: &WindowInfo,
+    src_monitor: &crate::monitor::MonitorInfo,
+    dest_monitor: &crate::monitor::MonitorInfo,
+) -> (i32, i32, i32, i32) {
+    // 全画面ウィンドウは作業領域の比率で拡縮すると、タスクバー差分だけ
+    // 移動先モニターからはみ出す。移動先のモニター全域へ正確に合わせる。
+    if win.is_fullscreen {
+        let area = &dest_monitor.monitor_area;
+        return (
+            area.left,
+            area.top,
+            area.right - area.left,
+            area.bottom - area.top,
+        );
+    }
+
+    let window_rect = &win.rect;
+    if let Some(snap) = apply_snap_correction(window_rect, &src_monitor.work_area, &dest_monitor.work_area) {
+        snap
+    } else {
+        // Fallback to ratio scaling
+        let src_w = src_monitor.work_area.right - src_monitor.work_area.left;
+        let src_h = src_monitor.work_area.bottom - src_monitor.work_area.top;
+        let win_w = window_rect.right - window_rect.left;
+        let win_h = window_rect.bottom - window_rect.top;
+
+        let ratio_x = (dest_monitor.work_area.right - dest_monitor.work_area.left) as f32 / src_w as f32;
+        let ratio_y = (dest_monitor.work_area.bottom - dest_monitor.work_area.top) as f32 / src_h as f32;
+
+        let rel_x = window_rect.left - src_monitor.work_area.left;
+        let rel_y = window_rect.top - src_monitor.work_area.top;
+
+        (
+            dest_monitor.work_area.left + (rel_x as f32 * ratio_x).round() as i32,
+            dest_monitor.work_area.top + (rel_y as f32 * ratio_y).round() as i32,
+            (win_w as f32 * ratio_x).round() as i32,
+            (win_h as f32 * ratio_y).round() as i32
+        )
+    }
+}
+
 pub fn move_windows(windows_to_move: &[WindowInfo], src_monitor: &crate::monitor::MonitorInfo, dest_monitor: &crate::monitor::MonitorInfo) {
     // windows_to_move is sorted top to bottom (Z-order).
     // By processing bottom to top and placing them at HWND_TOP, their relative Z-order on the new monitor is perfectly restored.
     for win in windows_to_move.iter().rev() {
         move_window(win, src_monitor, dest_monitor, 0); // 0 corresponds to HWND_TOP
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn monitor(
+        name: &str,
+        monitor_area: MonitorRect,
+        work_area: MonitorRect,
+    ) -> crate::monitor::MonitorInfo {
+        crate::monitor::MonitorInfo {
+            hmonitor: 0,
+            name: name.to_string(),
+            display_number: 1,
+            manufacturer: String::new(),
+            serial_number: String::new(),
+            work_area,
+            monitor_area,
+            is_primary: false,
+        }
+    }
+
+    #[test]
+    fn fullscreen_window_uses_exact_destination_monitor_area() {
+        let src = monitor(
+            "src",
+            MonitorRect { left: 3440, top: 0, right: 5360, bottom: 1080 },
+            MonitorRect { left: 3440, top: 0, right: 5360, bottom: 1032 },
+        );
+        let dest = monitor(
+            "dest",
+            MonitorRect { left: 0, top: 0, right: 3440, bottom: 1440 },
+            MonitorRect { left: 0, top: 0, right: 3440, bottom: 1392 },
+        );
+        let win = WindowInfo {
+            hwnd: 1,
+            title: "Remote Desktop".to_string(),
+            rect: src.monitor_area.clone(),
+            dpi: 96,
+            is_maximized: false,
+            is_minimized: false,
+            is_fullscreen: true,
+            process_name: "mstsc.exe".to_string(),
+            class_name: "TscShellContainerClass".to_string(),
+            style: 0,
+            ex_style: 0,
+        };
+
+        assert_eq!(calculate_target_rect(&win, &src, &dest), (0, 0, 3440, 1440));
     }
 }

@@ -7,7 +7,6 @@ export type AppConfig = {
   primary_monitor_id: string | null;
   swap_within_groups: boolean;
   monitor_order: string[];
-  ignore_fullscreen: boolean;
   run_on_startup: boolean;
   run_as_admin: boolean;
   monitor_groups: Record<string, number>;
@@ -16,7 +15,7 @@ export type AppConfig = {
   escape_hotkey: string;
   gather_hotkey: string;
   arrange_hotkey: string;
-  exclude_minimized: boolean;
+  rule_schema_version: number;
   exclusion_rules: string;
 };
 
@@ -37,6 +36,9 @@ export type WindowUIData = {
     process_name: string;
     class_name: string;
     is_pinned: boolean;
+    is_fullscreen: boolean;
+    is_minimized: boolean;
+    is_maximized: boolean;
     style: number;
     ex_style: number;
 };

@@ -153,18 +153,12 @@ export function SettingsPanel({
                                 checked={config.swap_within_groups}
                                 onChange={(v) => updateConfig({ swap_within_groups: v })}
                             />
-                            <ToggleOption
-                                label="フルスクリーンウィンドウを移動対象から除外"
-                                description="ゲームなどのフルスクリーンウィンドウは移動対象から外します"
-                                checked={config.ignore_fullscreen}
-                                onChange={(v) => updateConfig({ ignore_fullscreen: v })}
-                            />
-                            <ToggleOption
-                                label="最小化ウィンドウを移動対象から除外"
-                                description="最小化されているウィンドウを移動対象から外すことで、パフォーマンスが向上します"
-                                checked={config.exclude_minimized}
-                                onChange={(v) => updateConfig({ exclude_minimized: v })}
-                            />
+                            <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl">
+                                <div className="text-base font-medium text-slate-200">ウィンドウ状態による除外</div>
+                                <div className="text-sm text-slate-500 mt-1">
+                                    フルスクリーン・最小化・最大化の除外条件は「除外リスト」でまとめて設定できます。
+                                </div>
+                            </div>
                         </div>
                     </section>
 
