@@ -12,6 +12,24 @@ export type RuleNode =
   | { type: "group"; match_type: string; children: RuleNode[] }
   | { type: "rule"; conditions: RuleCondition[] };
 
+export type ManagedExclusion = "fullscreen" | "minimized";
+
+const MANAGED_EXCLUSION_RULES: Record<ManagedExclusion, RuleNode> = {
+    fullscreen: {
+        type: "rule",
+        conditions: [
+            { field: "is_fullscreen", operator: "equals", value: "true" },
+            { field: "process_name", operator: "not_wildcard", value: "mstsc*.exe" },
+        ],
+    },
+    minimized: {
+        type: "rule",
+        conditions: [
+            { field: "is_minimized", operator: "equals", value: "true" },
+        ],
+    },
+};
+
 /**
  * `*` は0文字以上、`?` は任意の1文字に一致する。
  * Windows上の名前を扱いやすくするため、大文字・小文字は区別しない。
@@ -127,6 +145,74 @@ export function parseRules(jsonStr: string): RuleNode {
 export function isExcluded(win: WindowUIData, jsonStr: string): boolean {
     const root = parseRules(jsonStr);
     return matchNode(win, root);
+}
+
+// --- 設定画面の簡易トグルと除外JSONの同期 ---
+
+function sameCondition(left: RuleCondition, right: RuleCondition): boolean {
+    return left.field === right.field
+        && left.operator === right.operator
+        && left.value === right.value;
+}
+
+function isManagedRule(node: RuleNode, managed: ManagedExclusion): boolean {
+    if (node.type !== "rule") return false;
+    const expected = MANAGED_EXCLUSION_RULES[managed];
+    if (expected.type !== "rule" || node.conditions.length !== expected.conditions.length) {
+        return false;
+    }
+    return expected.conditions.every(expectedCondition =>
+        node.conditions.some(condition => sameCondition(condition, expectedCondition))
+    );
+}
+
+function hasTopLevelManagedRule(node: RuleNode, managed: ManagedExclusion): boolean {
+    if (isManagedRule(node, managed)) return true;
+    return node.type === "group"
+        && node.match_type.toUpperCase() === "OR"
+        && node.children.some(child => isManagedRule(child, managed));
+}
+
+/** 設定画面のトグルに対応する組み込みルールがJSON内に存在するか。 */
+export function hasManagedExclusion(jsonStr: string, managed: ManagedExclusion): boolean {
+    return hasTopLevelManagedRule(parseRules(jsonStr), managed);
+}
+
+/**
+ * 組み込みルールだけを追加・削除し、利用者が作った他のルールは保持する。
+ * 追加時にルートがORグループでなければORで包み、除外条件として独立させる。
+ */
+export function setManagedExclusion(
+    jsonStr: string,
+    managed: ManagedExclusion,
+    enabled: boolean,
+): string {
+    const current = parseRules(jsonStr);
+    let next: RuleNode;
+
+    if (enabled) {
+        if (hasTopLevelManagedRule(current, managed)) return jsonStr;
+        const managedRule = JSON.parse(
+            JSON.stringify(MANAGED_EXCLUSION_RULES[managed]),
+        ) as RuleNode;
+        next = current.type === "group" && current.match_type.toUpperCase() === "OR"
+            ? { ...current, children: [...current.children, managedRule] }
+            : { type: "group", match_type: "OR", children: [current, managedRule] };
+    } else {
+        if (isManagedRule(current, managed)) {
+            next = { type: "group", match_type: "OR", children: [] };
+        } else if (current.type === "group" && current.match_type.toUpperCase() === "OR") {
+            next = {
+                ...current,
+                children: current.children.filter(child => !isManagedRule(child, managed)),
+            };
+        } else {
+            // ネストされた同形ルールは利用者作成ルールとして扱い、変更しない。
+            return jsonStr;
+        }
+    }
+
+    return JSON.stringify(next, null, 2);
 }
 
 // --- ツリー操作 ---

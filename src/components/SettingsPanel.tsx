@@ -5,6 +5,7 @@ import { ShieldAlert, Keyboard } from "lucide-react";
 import { cn } from "../lib/utils";
 import { invoke } from "@tauri-apps/api/core";
 import { save, open } from "@tauri-apps/plugin-dialog";
+import { hasManagedExclusion, setManagedExclusion, type ManagedExclusion } from "../lib/ruleUtils";
 
 export function SettingsPanel({
     config,
@@ -100,6 +101,11 @@ export function SettingsPanel({
         onChange({ ...config, ...updates });
     };
 
+    const updateManagedExclusion = (managed: ManagedExclusion, enabled: boolean) => {
+        const exclusionRules = setManagedExclusion(config.exclusion_rules, managed, enabled);
+        updateConfig({ exclusion_rules: exclusionRules });
+    };
+
     return (
         <div className="flex-1 rounded-2xl bg-slate-900/40 border border-slate-800 backdrop-blur-sm p-6 overflow-y-auto">
             <div className="flex flex-col lg:flex-row gap-8">
@@ -153,11 +159,20 @@ export function SettingsPanel({
                                 checked={config.swap_within_groups}
                                 onChange={(v) => updateConfig({ swap_within_groups: v })}
                             />
-                            <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl">
-                                <div className="text-base font-medium text-slate-200">ウィンドウ状態による除外</div>
-                                <div className="text-sm text-slate-500 mt-1">
-                                    フルスクリーン・最小化・最大化の除外条件は「除外リスト」でまとめて設定できます。
-                                </div>
+                            <ToggleOption
+                                label="フルスクリーンウィンドウを移動対象から除外"
+                                description="ゲームなどの全画面ウィンドウを除外します。リモートデスクトップ（mstsc*.exe）は例外として移動します"
+                                checked={hasManagedExclusion(config.exclusion_rules, "fullscreen")}
+                                onChange={(v) => updateManagedExclusion("fullscreen", v)}
+                            />
+                            <ToggleOption
+                                label="最小化ウィンドウを移動対象から除外"
+                                description="最小化されているウィンドウを移動対象から外すことで、パフォーマンスが向上します"
+                                checked={hasManagedExclusion(config.exclusion_rules, "minimized")}
+                                onChange={(v) => updateManagedExclusion("minimized", v)}
+                            />
+                            <div className="px-1 text-xs text-slate-500">
+                                これらのトグルは「除外リスト」の対応するJSONルールを直接追加・削除します。
                             </div>
                         </div>
                     </section>

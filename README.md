@@ -76,7 +76,7 @@
 2. 次に設定画面を開き、「除外リスト」タブを開きます。
 3. すでにピン留めされているウィンドウが提案されるため、そのままルールに追加することで手軽に除外リストへ登録できます。
 
-プロセス名・クラス名・タイトル等に加え、フルスクリーン・最小化・最大化の状態も条件にできます。文字列条件では `*`（0文字以上）と `?`（任意の1文字）のワイルドカードが使用できます。既定では一般的なフルスクリーンウィンドウと最小化ウィンドウを除外し、`mstsc*.exe` のフルスクリーンRDPは移動対象に含めるルールが登録されます。
+プロセス名・クラス名・タイトル等に加え、フルスクリーン・最小化・最大化の状態も条件にできます。文字列条件では `*`（0文字以上）と `?`（任意の1文字）のワイルドカードが使用できます。既定では一般的なフルスクリーンウィンドウと最小化ウィンドウを除外し、`mstsc*.exe` のフルスクリーンRDPは移動対象に含めるルールが登録されます。設定画面のフルスクリーン／最小化トグルは、この組み込みルールをJSONへ追加・削除する簡易操作です。
 
 ### 【v0.2】CLIからの実行（外部アプリ連携）
 
@@ -135,7 +135,7 @@ ChuwitchWindow --swap 1 2
 - 自動起動の登録ができます。
 - ショートカットキーの設定ができます。
 - グループ内での入れ替えを行うかモード切替ができます。
-- フルスクリーン・最小化・最大化ウィンドウの扱いは「除外リスト」でルールとして変更できます。
+- フルスクリーン・最小化の簡易トグルは、対応する「除外リスト」のJSONルールと同期します。最大化などの詳細条件も除外リストで設定できます。
 
 ![](https://private-user-images.githubusercontent.com/55196383/553030503-3193eb73-6f15-4cf4-8a7e-34a94d00571a.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzE3NjMzODAsIm5iZiI6MTc3MTc2MzA4MCwicGF0aCI6Ii81NTE5NjM4My81NTMwMzA1MDMtMzE5M2ViNzMtNmYxNS00Y2Y0LThhN2UtMzRhOTRkMDA1NzFhLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMjIlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjIyVDEyMjQ0MFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWFlMjQ1M2E4NzU0ZjkxMjAwMDE2OGM1ZDMwZDU2NmM1YjBlNWNhZDg2NjZkMTZlMDRiYWNmMGZmYTY5ZDRkMGEmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.c3UaAfmygZkI9oXZvHI-M5OhtbiElO72KS3M3mrNlXA)
 

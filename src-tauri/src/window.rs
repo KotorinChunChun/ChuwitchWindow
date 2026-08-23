@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
+use std::thread;
+use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, CloseHandle};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::System::Com::{
@@ -20,6 +22,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::monitor::MonitorRect;
+
+const RDP_PROCESS_NAME: &str = "mstsc.exe";
+const RDP_TRANSITION_TIMEOUT: Duration = Duration::from_millis(2_000);
+const RDP_POLL_INTERVAL: Duration = Duration::from_millis(40);
+const RDP_RESIZE_SETTLE_DELAY: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowInfo {
@@ -165,16 +172,7 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
 
     let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
     let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
-    let has_caption = (style & WS_CAPTION.0) == WS_CAPTION.0;
-    let has_thickframe = (style & WS_THICKFRAME.0) == WS_THICKFRAME.0;
-
-    let is_fullscreen = state.monitors.iter().any(|m| {
-        // ウィンドウの領域がモニター全画面領域と等しい、またはそれより大きい
-        rect.left <= m.monitor_area.left
-            && rect.top <= m.monitor_area.top
-            && rect.right >= m.monitor_area.right
-            && rect.bottom >= m.monitor_area.bottom
-    }) && (!has_caption && !has_thickframe);
+    let is_fullscreen = is_fullscreen_rect(&rect.into(), style, &state.monitors);
 
     // --- v0.2: プロセス名を取得 ---
     let process_name = {
@@ -284,15 +282,21 @@ pub fn move_window(
     use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, ShowWindow, SWP_NOACTIVATE, HWND_TOP, SW_RESTORE, SW_MAXIMIZE};
 
     let hwnd = HWND(win.hwnd);
+    let insert_after = if hwnd_insert_after == 0 {
+        HWND_TOP
+    } else {
+        HWND(hwnd_insert_after)
+    };
+
+    if should_reenter_rdp_fullscreen(win)
+        && move_fullscreen_rdp(hwnd, dest_monitor, insert_after)
+    {
+        return;
+    }
+
     let (new_x, new_y, new_w, new_h) = calculate_target_rect(win, src_monitor, dest_monitor);
 
     unsafe {
-        let insert_after = if hwnd_insert_after == 0 {
-            HWND_TOP
-        } else {
-            HWND(hwnd_insert_after)
-        };
-
         if win.is_maximized {
             let _ = ShowWindow(hwnd, SW_RESTORE);
         }
@@ -310,6 +314,221 @@ pub fn move_window(
         if win.is_maximized {
             let _ = ShowWindow(hwnd, SW_MAXIMIZE);
         }
+    }
+}
+
+fn should_reenter_rdp_fullscreen(win: &WindowInfo) -> bool {
+    win.is_fullscreen && win.process_name.eq_ignore_ascii_case(RDP_PROCESS_NAME)
+}
+
+/// mstsc の全画面表示は、ウィンドウ枠だけをリサイズしてもリモート側の
+/// デスクトップ解像度が更新されない。公式ショートカットで一度ウィンドウ化し、
+/// 移動先モニターへ配置してから全画面へ戻すことで、mstsc 自身に解像度を再選択させる。
+fn move_fullscreen_rdp(
+    hwnd: HWND,
+    dest_monitor: &crate::monitor::MonitorInfo,
+    insert_after: HWND,
+) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, IsWindow, SetWindowPos, SWP_NOACTIVATE,
+    };
+
+    if !unsafe { IsWindow(hwnd) }.as_bool() {
+        tracing::warn!("[RDP] 移動対象のウィンドウが無効です: hwnd={}", hwnd.0);
+        return false;
+    }
+
+    wait_for_trigger_keys_released();
+    let previous_foreground = unsafe { GetForegroundWindow() };
+
+    if !send_rdp_fullscreen_toggle(hwnd) {
+        tracing::warn!("[RDP] 全画面解除キーの送出に失敗しました: hwnd={}", hwnd.0);
+        restore_foreground(previous_foreground, hwnd);
+        return false;
+    }
+
+    let monitors = crate::monitor::get_all_monitors();
+    if !wait_for_fullscreen_state(hwnd, false, &monitors) {
+        tracing::warn!("[RDP] 全画面解除を確認できませんでした: hwnd={}", hwnd.0);
+        restore_foreground(previous_foreground, hwnd);
+        return false;
+    }
+
+    let (x, y, width, height) = rdp_windowed_target_rect(dest_monitor);
+    let moved = unsafe {
+        SetWindowPos(
+            hwnd,
+            insert_after,
+            x,
+            y,
+            width,
+            height,
+            SWP_NOACTIVATE,
+        )
+    }
+    .is_ok();
+
+    if !moved {
+        tracing::warn!("[RDP] ウィンドウ化後の移動に失敗しました: hwnd={}", hwnd.0);
+    }
+
+    // WM_SIZE と動的解像度変更を処理する猶予を与えてから全画面へ戻す。
+    thread::sleep(RDP_RESIZE_SETTLE_DELAY);
+
+    let entered_fullscreen = if send_rdp_fullscreen_toggle(hwnd) {
+        wait_for_fullscreen_state(hwnd, true, std::slice::from_ref(dest_monitor))
+    } else {
+        false
+    };
+
+    if !entered_fullscreen {
+        tracing::warn!(
+            "[RDP] 移動先での全画面化を確認できませんでした: hwnd={} monitor={}",
+            hwnd.0,
+            dest_monitor.name
+        );
+    } else {
+        tracing::info!(
+            "[RDP] 全画面解除→移動→再全画面化が完了しました: hwnd={} monitor={}",
+            hwnd.0,
+            dest_monitor.name
+        );
+    }
+
+    restore_foreground(previous_foreground, hwnd);
+    // 一度ウィンドウ化できた場合は、失敗時も通常の境界リサイズへ戻さない。
+    // 再全画面化に失敗したウィンドウをさらに変形させず、ログから診断可能にする。
+    true
+}
+
+fn rdp_windowed_target_rect(
+    dest_monitor: &crate::monitor::MonitorInfo,
+) -> (i32, i32, i32, i32) {
+    let area = &dest_monitor.work_area;
+    (
+        area.left,
+        area.top,
+        area.right - area.left,
+        area.bottom - area.top,
+    )
+}
+
+fn send_rdp_fullscreen_toggle(hwnd: HWND) -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL,
+        VK_MENU, VK_PAUSE,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+
+    let focused = unsafe { SetForegroundWindow(hwnd) }.as_bool()
+        || unsafe {
+            windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() == hwnd
+        };
+    if !focused {
+        tracing::warn!("[RDP] 対象ウィンドウを前面化できませんでした: hwnd={}", hwnd.0);
+        return false;
+    }
+    thread::sleep(Duration::from_millis(60));
+
+    let key = |virtual_key, key_up| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: virtual_key,
+                wScan: 0,
+                dwFlags: if key_up { KEYEVENTF_KEYUP } else { Default::default() },
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+
+    // Microsoft公式仕様で全画面／ウィンドウ表示を切り替える Ctrl+Alt+Pause。
+    let inputs = [
+        key(VK_CONTROL, false),
+        key(VK_MENU, false),
+        key(VK_PAUSE, false),
+        key(VK_PAUSE, true),
+        key(VK_MENU, true),
+        key(VK_CONTROL, true),
+    ];
+    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+    sent == inputs.len() as u32
+}
+
+fn wait_for_trigger_keys_released() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_CONTROL, VK_DOWN, VK_LEFT, VK_MENU, VK_RIGHT, VK_UP, VK_LWIN,
+        VK_RWIN,
+    };
+
+    let keys = [
+        VK_CONTROL.0 as i32,
+        VK_MENU.0 as i32,
+        VK_LWIN.0 as i32,
+        VK_RWIN.0 as i32,
+        VK_LEFT.0 as i32,
+        VK_RIGHT.0 as i32,
+        VK_UP.0 as i32,
+        VK_DOWN.0 as i32,
+    ];
+    let deadline = Instant::now() + Duration::from_millis(1_000);
+    while Instant::now() < deadline {
+        let any_pressed = keys
+            .iter()
+            .any(|key| unsafe { GetAsyncKeyState(*key) } < 0);
+        if !any_pressed {
+            return;
+        }
+        thread::sleep(RDP_POLL_INTERVAL);
+    }
+    tracing::warn!("[RDP] 操作キーの解放待ちがタイムアウトしました");
+}
+
+fn wait_for_fullscreen_state(
+    hwnd: HWND,
+    expected: bool,
+    monitors: &[crate::monitor::MonitorInfo],
+) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongW, GetWindowRect, IsWindow, GWL_STYLE};
+
+    let deadline = Instant::now() + RDP_TRANSITION_TIMEOUT;
+    while Instant::now() < deadline {
+        if !unsafe { IsWindow(hwnd) }.as_bool() {
+            return false;
+        }
+        let mut rect = RECT::default();
+        let rect_ok = unsafe { GetWindowRect(hwnd, &mut rect) }.is_ok();
+        let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
+        if rect_ok && is_fullscreen_rect(&rect.into(), style, monitors) == expected {
+            return true;
+        }
+        thread::sleep(RDP_POLL_INTERVAL);
+    }
+    false
+}
+
+fn is_fullscreen_rect(
+    rect: &MonitorRect,
+    style: u32,
+    monitors: &[crate::monitor::MonitorInfo],
+) -> bool {
+    let has_caption = (style & WS_CAPTION.0) == WS_CAPTION.0;
+    let has_thickframe = (style & WS_THICKFRAME.0) == WS_THICKFRAME.0;
+    monitors.iter().any(|monitor| {
+        rect.left <= monitor.monitor_area.left
+            && rect.top <= monitor.monitor_area.top
+            && rect.right >= monitor.monitor_area.right
+            && rect.bottom >= monitor.monitor_area.bottom
+    }) && !has_caption
+        && !has_thickframe
+}
+
+fn restore_foreground(previous: HWND, rdp: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{IsWindow, SetForegroundWindow};
+
+    if previous.0 != 0 && previous != rdp && unsafe { IsWindow(previous) }.as_bool() {
+        let _ = unsafe { SetForegroundWindow(previous) };
     }
 }
 
@@ -411,5 +630,35 @@ mod tests {
         };
 
         assert_eq!(calculate_target_rect(&win, &src, &dest), (0, 0, 3440, 1440));
+    }
+
+    #[test]
+    fn fullscreen_mstsc_uses_reentry_sequence_case_insensitively() {
+        let win = WindowInfo {
+            hwnd: 1,
+            title: "Remote Desktop".to_string(),
+            rect: MonitorRect { left: 0, top: 0, right: 1920, bottom: 1080 },
+            dpi: 96,
+            is_maximized: false,
+            is_minimized: false,
+            is_fullscreen: true,
+            process_name: "MSTSC.EXE".to_string(),
+            class_name: "TscShellContainerClass".to_string(),
+            style: 0,
+            ex_style: 0,
+        };
+
+        assert!(should_reenter_rdp_fullscreen(&win));
+    }
+
+    #[test]
+    fn rdp_windowed_stage_uses_destination_work_area() {
+        let dest = monitor(
+            "dest",
+            MonitorRect { left: 1920, top: 0, right: 4480, bottom: 1440 },
+            MonitorRect { left: 1920, top: 0, right: 4480, bottom: 1392 },
+        );
+
+        assert_eq!(rdp_windowed_target_rect(&dest), (1920, 0, 2560, 1392));
     }
 }
