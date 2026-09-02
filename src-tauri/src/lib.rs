@@ -13,6 +13,9 @@ pub mod rule;
 pub mod tray;
 pub mod window;
 
+#[cfg(test)]
+pub mod test_support;
+
 use tauri::{AppHandle, Manager};
 
 pub fn show_main_window(app: &AppHandle) {

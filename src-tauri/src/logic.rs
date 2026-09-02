@@ -344,48 +344,16 @@ pub fn handle_gather(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use windows::Win32::Foundation::RECT;
-
-    fn create_mock_monitor(name: &str, left: i32, top: i32, right: i32, bottom: i32) -> MonitorInfo {
-        MonitorInfo {
-            hmonitor: 0,
-            name: name.to_string(),
-            display_number: 1,
-            manufacturer: "".to_string(),
-            serial_number: "".to_string(),
-            work_area: RECT { left, top, right, bottom }.into(),
-            monitor_area: RECT { left, top, right, bottom }.into(),
-            is_primary: false,
-        }
-    }
-
-    fn create_mock_window(hwnd_id: isize, left: i32, top: i32, right: i32, bottom: i32) -> WindowInfo {
-        WindowInfo {
-            hwnd: hwnd_id,
-            title: "Mock Window".to_string(),
-            rect: RECT { left, top, right, bottom }.into(),
-            dpi: 96,
-            is_maximized: false,
-            is_minimized: false,
-            is_fullscreen: false,
-            process_name: "mock.exe".to_string(),
-            class_name: "MockClass".to_string(),
-            style: 0,
-            ex_style: 0,
-        }
-    }
+    use crate::test_support::{dual_setup, WindowBuilder};
 
     #[test]
     fn test_group_windows_by_monitor() {
-        let monitors = vec![
-            create_mock_monitor("M1", 0, 0, 1920, 1080),
-            create_mock_monitor("M2", 1920, 0, 3840, 1080),
-        ];
+        let monitors = dual_setup();
         
         let windows = vec![
-            create_mock_window(1, 100, 100, 500, 500), // M1
-            create_mock_window(2, 2000, 100, 2500, 500), // M2
-            create_mock_window(3, -100, -100, 50, 50), // M1 (intersect 50x50 with M1)
+            WindowBuilder::new(1).rect(100, 100, 500, 500).build(),
+            WindowBuilder::new(2).rect(2000, 100, 2500, 500).build(),
+            WindowBuilder::new(3).rect(-100, -100, 50, 50).build(),
         ];
 
         let grouped = group_windows_by_monitor(&windows, &monitors);

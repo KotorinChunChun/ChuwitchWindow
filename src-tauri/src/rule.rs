@@ -162,19 +162,12 @@ mod tests {
     use super::*;
 
     fn create_mock_window(process_name: &str, class_name: &str, title: &str) -> WindowInfo {
-        WindowInfo {
-            hwnd: 0,
-            title: title.to_string(),
-            rect: crate::monitor::MonitorRect { left: 0, top: 0, right: 100, bottom: 100 },
-            dpi: 96,
-            is_maximized: false,
-            is_minimized: false,
-            is_fullscreen: false,
-            process_name: process_name.to_string(),
-            class_name: class_name.to_string(),
-            style: 0,
-            ex_style: 0,
-        }
+        crate::test_support::WindowBuilder::new(0)
+            .title(title)
+            .process(process_name)
+            .class(class_name)
+            .rect(0, 0, 100, 100)
+            .build()
     }
 
     // ---------------------------------------------------------
