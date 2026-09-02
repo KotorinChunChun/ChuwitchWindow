@@ -7,12 +7,11 @@
 
 ## プロジェクト概要
 
-本プロジェクトは、AIと協力して以下の工程で開発を行いました。
+基本的な操作説明は本書、詳細は次を参照してください。
 
-1. 開発に至った背景 : [BACK.md](docs/BACK.md)
-2. 仕様書 (v0.1) : [SPECv0.1.md](docs/SPECv0.1.md)
-3. 仕様書 (v0.2) : [SPECv0.2.md](docs/SPECv0.2.md)
-4. AIコーディング : [DEV.md](docs/DEV.md)
+- 背景とショートカット: [USERS_GUIDE.md](docs/USERS_GUIDE.md)
+- よくある質問: [FAQ.md](docs/FAQ.md)
+- ビルド・開発: [DEVELOPERS_GUIDE.md](docs/DEVELOPERS_GUIDE.md)
 
 本書では、基本的な操作説明のみを行います。
 
@@ -147,7 +146,7 @@ ChuwitchWindow --swap 1 2
 
 ## 利用条件
 
-- 本ツールはフリーウェアです。無制限にご利用頂けます。
+- 本ツールはフリーウェアです（[MIT License](LICENSE)）。無制限にご利用頂けます。
 - 本ツールを使用したことにより発生したいかなる損害も作者は責任を負いません。
 - Rust未経験者がAIを頼りに書いているため、コード品質については期待しないでください。
 - バグや追加して欲しい機能などがあれば、GitHubのIssuesやTwitterなどでお声掛けください。

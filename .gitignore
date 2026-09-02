@@ -39,6 +39,11 @@ src-tauri/err.txt
 data/
 src-tauri/icons/
 
+# 開発文書（Markdown）は追跡する（PROJECT_RULE.md）。
+# リリース脚本はローカルのみ（決定 Q14-B）。
+dev/scripts/
+dev/*.ps1
+
 メモ.md
 build_error.log
 src-tauri/build_error_monitor.txt
