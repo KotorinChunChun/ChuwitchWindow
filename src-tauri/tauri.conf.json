@@ -28,7 +28,7 @@
     },
     "bundle": {
         "active": true,
-        "targets": "all",
+        "targets": "nsis",
         "resources": [
             "../README.md"
         ],

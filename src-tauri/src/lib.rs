@@ -1,3 +1,4 @@
+pub mod action;
 pub mod admin;
 pub mod arrange;
 pub mod commands;
@@ -30,13 +31,14 @@ pub fn show_main_window(app: &AppHandle) {
         if let Ok(builder) = tauri::WebviewWindowBuilder::new(
             app,
             "main",
-            tauri::WebviewUrl::App("index.html".into())
+            tauri::WebviewUrl::App("index.html".into()),
         )
         .title("ChuwitchWindow 設定")
         .inner_size(800.0, 600.0)
         .resizable(true)
         .visible(true)
-        .build() {
+        .build()
+        {
             let _ = builder.set_always_on_top(true);
             let _ = builder.set_always_on_top(false);
             let _ = builder.set_focus();
@@ -51,7 +53,11 @@ const ARRANGE_WINDOW_WIDTH: f64 = 1200.0;
 const ARRANGE_WINDOW_HEIGHT: f64 = 400.0;
 
 /// モニター領域の中心にウィンドウを配置するための左上座標を計算する
-fn calc_center_position(monitor: &crate::monitor::MonitorInfo, width: f64, height: f64) -> (f64, f64) {
+fn calc_center_position(
+    monitor: &crate::monitor::MonitorInfo,
+    width: f64,
+    height: f64,
+) -> (f64, f64) {
     let center_x = monitor.monitor_area.left as f64
         + (monitor.monitor_area.right - monitor.monitor_area.left) as f64 / 2.0;
     let center_y = monitor.monitor_area.top as f64
@@ -70,10 +76,11 @@ pub fn show_arrange_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("arrange") {
         let _ = window.show();
         let _ = window.set_focus();
-        
+
         // 中心に移動させる処理
         if let Some(monitor) = get_active_monitor_info() {
-            let (x, y) = calc_center_position(&monitor, ARRANGE_WINDOW_WIDTH, ARRANGE_WINDOW_HEIGHT);
+            let (x, y) =
+                calc_center_position(&monitor, ARRANGE_WINDOW_WIDTH, ARRANGE_WINDOW_HEIGHT);
             let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
                 x: x as i32,
                 y: y as i32,
@@ -87,7 +94,7 @@ pub fn show_arrange_window(app: &AppHandle) {
         let mut builder = tauri::WebviewWindowBuilder::new(
             app,
             "arrange",
-            tauri::WebviewUrl::App("index.html#arrange".into())
+            tauri::WebviewUrl::App("index.html#arrange".into()),
         )
         .title("ChuwitchWindow 整列選択")
         .inner_size(ARRANGE_WINDOW_WIDTH, ARRANGE_WINDOW_HEIGHT)
@@ -98,7 +105,8 @@ pub fn show_arrange_window(app: &AppHandle) {
         .center();
 
         if let Some(monitor) = get_active_monitor_info() {
-            let (x, y) = calc_center_position(&monitor, ARRANGE_WINDOW_WIDTH, ARRANGE_WINDOW_HEIGHT);
+            let (x, y) =
+                calc_center_position(&monitor, ARRANGE_WINDOW_WIDTH, ARRANGE_WINDOW_HEIGHT);
             builder = builder.position(x, y);
         }
 
@@ -111,16 +119,20 @@ pub fn show_arrange_window(app: &AppHandle) {
 // ------------------------------------
 fn get_active_monitor_info() -> Option<crate::monitor::MonitorInfo> {
     unsafe {
-        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
         use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
-        
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+
         let hwnd = GetForegroundWindow();
-        if hwnd.0 == 0 { return None; }
-        
+        if hwnd.0 == 0 {
+            return None;
+        }
+
         let hmonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        
+
         let monitors = crate::monitor::get_all_monitors();
-        monitors.into_iter().find(|m| m.hmonitor == hmonitor.0 as isize)
+        monitors
+            .into_iter()
+            .find(|m| m.hmonitor == hmonitor.0 as isize)
     }
 }
 
@@ -130,40 +142,13 @@ pub fn hide_arrange_window(app: &AppHandle) {
     }
 }
 
-
 /// CLI引数をディスパッチする共通関数。
 /// 引数の中にアクションコマンドが含まれていれば実行し、1つでも実行したら true を返す。
-fn dispatch_cli_action(app: &AppHandle, args: &[String]) -> bool {
-    use tauri::Emitter;
-    let mut matched = false;
-    for arg in args {
-        if arg == "--rotate-cw" {
-            crate::logic::handle_rotate(app, true);
-            matched = true;
-        } else if arg == "--rotate-ccw" {
-            crate::logic::handle_rotate(app, false);
-            matched = true;
-        } else if arg == "--undo" {
-            crate::logic::handle_undo(app);
-            matched = true;
-        } else if arg == "--pin-toggle" {
-            crate::pin::toggle_pin();
-            let _ = app.emit("pin-toggled", ());
-            matched = true;
-        } else if arg == "--escape" {
-            crate::logic::handle_escape(app);
-            matched = true;
-        } else if arg == "--gather" {
-            crate::logic::handle_gather(app);
-            matched = true;
-        } else if let Some(target_str) = arg.strip_prefix("--swap=") {
-            if let Ok(target) = target_str.parse::<u32>() {
-                crate::logic::handle_swap_target(app, target);
-                matched = true;
-            }
-        }
-    }
-    matched
+fn dispatch_cli_action(
+    app: &AppHandle,
+    args: &[String],
+) -> Result<bool, crate::action::ParseError> {
+    crate::action::dispatch_cli_action(app, args)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -174,10 +159,19 @@ pub fn run() {
             let args: Vec<String> = std::env::args().collect();
             tracing::info!("App starting with args: {:?}", args);
 
-            if dispatch_cli_action(app.handle(), &args) {
-                // ワンショット実行の場合は常駐せずに即終了
-                app.handle().exit(0);
-                return Ok(());
+            match dispatch_cli_action(app.handle(), &args) {
+                Ok(true) => {
+                    // ワンショット実行の場合は常駐せずに即終了
+                    app.handle().exit(0);
+                    return Ok(());
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::error!("CLI引数の解析に失敗しました: {}", error.message);
+                    eprintln!("{}", error.message);
+                    app.handle().exit(1);
+                    return Ok(());
+                }
             }
 
             hotplug::start_hotplug_listener(app.handle().clone());
@@ -185,9 +179,10 @@ pub fn run() {
             let _ = tray::setup_tray(app.handle());
 
             // 引数に --autostart, --hide, -hide が含まれていない場合のみウィンドウを表示（GUIからの通常起動）
-            if !args.contains(&"--autostart".to_string()) 
-                && !args.contains(&"--hide".to_string()) 
-                && !args.contains(&"-hide".to_string()) {
+            if !args.contains(&"--autostart".to_string())
+                && !args.contains(&"--hide".to_string())
+                && !args.contains(&"-hide".to_string())
+            {
                 crate::show_main_window(app.handle());
             } else {
                 // 自動起動・非表示時はメインウィンドウを破棄してメモリ削減
@@ -201,8 +196,13 @@ pub fn run() {
             tracing::info!("Received IPC args from secondary instance: {:?}", args);
 
             // CLIコマンドでなければ通常のGUI呼出とみなしてメイン画面を表示
-            if !dispatch_cli_action(app, &args) {
-                crate::show_main_window(app);
+            match dispatch_cli_action(app, &args) {
+                Ok(true) => {}
+                Ok(false) => crate::show_main_window(app),
+                Err(error) => {
+                    // 第二インスタンスの不正な引数で常駐中の本体を終了させない。
+                    tracing::error!("第二インスタンスのCLI引数を拒否しました: {}", error.message);
+                }
             }
         }))
         .plugin(tauri_plugin_autostart::init(
