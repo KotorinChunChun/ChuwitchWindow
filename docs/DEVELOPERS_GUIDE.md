@@ -1,6 +1,6 @@
 # ChuwitchWindow 開発者ガイド
 
-ビルド・構成・リリース。方針の原本は `dev/templates/PROJECT_RULE.md`。
+ビルド・構成・テストの公開開発者向けガイド。必須ルールと資料目録の正本は [AGENTS.md](../AGENTS.md)、配布・公開手順の正本は [dev/RELEASE_RULE.md](../dev/RELEASE_RULE.md)。
 
 利用者向けは [README.md](../README.md) と [USERS_GUIDE.md](USERS_GUIDE.md)。
 
@@ -35,6 +35,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 ## プロジェクト構成
 
 ```
+├── AGENTS.md                  # 必須ルール・配置・資料目録
 ├── README.md
 ├── LICENSE
 ├── docs/                      # 利用者向け
@@ -42,8 +43,12 @@ cargo test --manifest-path src-tauri/Cargo.toml
 │   ├── DEVELOPERS_GUIDE.md    # 本ファイル
 │   ├── FAQ.md
 │   └── *.png
-├── dev/                       # 開発者・AI（Git 追跡。*.ps1 と scripts/ は除く）
-│   ├── templates/
+├── dev/                       # 開発者本人の計画・判断・記録（正式資料は Git 追跡）
+│   ├── README.md              # 開発資料の入口
+│   ├── RELEASE_RULE.md        # 配布・公開手順の正本
+│   ├── scripts/               # 実在する運用スクリプト（Git 追跡）
+│   ├── private/               # 非公開資料（Git 対象外）
+│   ├── temp/                  # プロジェクト外の一時制作物（Git 対象外）
 │   ├── history/               # 完了した版の要求
 │   ├── PLAN_IDEAS.md
 │   ├── PLAN_REJECT.md
@@ -66,15 +71,15 @@ cargo test --manifest-path src-tauri/Cargo.toml
 2. `src-tauri/tauri.conf.json`
 3. `package.json`
 
-一括更新スクリプトがあれば **ローカル** `dev/scripts/update_version.ps1`（Git 対象外）。リポジトリには置かない（決定 Q14-B）。
+次の補助スクリプトで上記 3 ファイルと `package-lock.json` を更新できる。実行後は差分を照合する。
 
 ```powershell
-pwsh -File .\dev\scripts\update_version.ps1 -NewVersion "0.2.2"
+pwsh -File .\dev\scripts\update-ChuwitchWindow-version.ps1 -NewVersion "0.2.2"
 ```
 
 ## リリース手順（本リポジトリ固有）
 
-汎用テンプレは [dev/templates/RELEASE_RULE.md](../dev/templates/RELEASE_RULE.md)。署名は MSI X 側（Q12）。自動化はローカルのみ。
+プロジェクト固有の手順は [dev/RELEASE_RULE.md](../dev/RELEASE_RULE.md)。署名は MSI X 側の別工程（Q12）であり、本リポジトリでは行わない。外部公開は明示依頼時だけ行う。
 
 すべて **pwsh**。
 
@@ -82,7 +87,7 @@ pwsh -File .\dev\scripts\update_version.ps1 -NewVersion "0.2.2"
 cd C:\develop\ChuwitchWindow
 npm test
 cargo test --manifest-path src-tauri/Cargo.toml
-# バージョンを 0.2.2 に揃える
+# バージョンを対象版へ揃える
 npm run tauri build
 ```
 
@@ -90,9 +95,11 @@ npm run tauri build
 - NSIS: `src-tauri/target/release/bundle/nsis/`
 - zip には exe と README.md
 - タグ例: `v0.2.2`
-- 公開控えはローカル `release/Publish/`（Git 対象外）
+- 公開控えはローカル `release/`（Git 対象外）
 
 品質ゲート: [v0.2.2-quality-gates.md](../dev/v0.2.2-quality-gates.md)。
+
+GitHub 公開を伴うスクリプトは `dev/scripts/publish-release-ChuwitchWindow-all.ps1`。公開の明示依頼がある場合だけ使用し、通常のビルド確認では実行しない。
 
 ## 技術スタック
 

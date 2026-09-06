@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "powershell -Command \"Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue\" && tsc && vite build",
+    "build": "pwsh -NoProfile -Command \"Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue\" && tsc && vite build",
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest"
