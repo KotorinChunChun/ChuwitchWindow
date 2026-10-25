@@ -64,8 +64,15 @@ impl Default for AppConfig {
     }
 }
 
+/// アプリのデータ保存先。Windows では設定が `%APPDATA%\kotorichun\chuwitchwindow\config`、
+/// ログが `%LOCALAPPDATA%\kotorichun\chuwitchwindow\data\logs` になる
+/// （アンインストーラー `nsis/hooks.nsh` の削除対象パスもこれに合わせている）。
+pub fn project_dirs() -> Option<ProjectDirs> {
+    ProjectDirs::from("com", "kotorichun", "chuwitchwindow")
+}
+
 pub fn get_config_path() -> Option<PathBuf> {
-    let proj_dirs = ProjectDirs::from("com", "kotorichun", "chuwitchwindow")?;
+    let proj_dirs = project_dirs()?;
     let config_dir = proj_dirs.config_dir();
     let _ = fs::create_dir_all(config_dir);
     Some(config_dir.join("config.json"))
@@ -82,12 +89,10 @@ pub fn load_config() -> AppConfig {
     AppConfig::default()
 }
 
-pub fn save_config(config: &AppConfig) {
-    if let Some(path) = get_config_path() {
-        if let Ok(content) = serde_json::to_string_pretty(config) {
-            let _ = fs::write(path, content);
-        }
-    }
+pub fn save_config(config: &AppConfig) -> Result<(), String> {
+    let path = get_config_path().ok_or("設定ファイルの保存先を取得できませんでした")?;
+    let content = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
+    fs::write(&path, content).map_err(|e| format!("{}: {}", path.display(), e))
 }
 
 pub fn reset_config() {

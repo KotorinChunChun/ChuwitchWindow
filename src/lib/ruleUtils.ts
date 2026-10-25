@@ -84,12 +84,6 @@ export function parseRules(jsonStr: string): RuleNode {
     return { type: "group", match_type: "OR", children: [] };
 }
 
-/** ウィンドウが除外ルールに一致するかを判定する */
-export function isExcluded(win: WindowUIData, jsonStr: string): boolean {
-    const root = parseRules(jsonStr);
-    return matchNode(win, root);
-}
-
 // --- ツリー操作 ---
 
 /** パスで指定されたノードを新しいノードに置き換える（null で削除） */

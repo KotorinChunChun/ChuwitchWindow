@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "powershell -Command \"Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue\" && tsc && vite build",
+    "build": "tsc && vite build",
     "tauri": "tauri"
   },
   "dependencies": {
