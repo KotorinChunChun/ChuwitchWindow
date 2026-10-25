@@ -6,7 +6,7 @@ import { SettingsPanel } from "@/components/SettingsPanel";
 import { ExclusionPanel } from "@/components/ExclusionPanel";
 import { ArrangePopup } from "@/components/ArrangePopup";
 import { AboutTab } from "@/components/AboutTab";
-import { Sidebar, type TabId } from "@/components/Sidebar";
+import { Sidebar, TAB_IDS, type TabId } from "@/components/Sidebar";
 import { CustomDialog, DialogKind } from "@/components/CustomDialog";
 import { cn } from "@/lib/utils";
 import { AppConfig, MonitorInfo } from "@/types";
@@ -100,13 +100,9 @@ function MainApp() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === "Tab") {
         e.preventDefault();
-        const tabs: TabId[] = ["map", "exclusion", "settings", "about"];
-        const currentIndex = tabs.indexOf(activeTab);
-        if (e.shiftKey) {
-          setActiveTab(tabs[(currentIndex - 1 + tabs.length) % tabs.length]);
-        } else {
-          setActiveTab(tabs[(currentIndex + 1) % tabs.length]);
-        }
+        const currentIndex = TAB_IDS.indexOf(activeTab);
+        const step = e.shiftKey ? TAB_IDS.length - 1 : 1;
+        setActiveTab(TAB_IDS[(currentIndex + step) % TAB_IDS.length]);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
