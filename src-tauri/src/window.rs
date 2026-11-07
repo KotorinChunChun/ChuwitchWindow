@@ -54,9 +54,7 @@ struct EnumState {
 /// OS上の移動候補ウィンドウを列挙する。
 /// フルスクリーンや最小化などの利用者設定は、列挙後に除外ルールで評価する。
 pub fn get_target_windows() -> Vec<WindowInfo> {
-    unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-    }
+    let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok();
     let vdm: Option<IVirtualDesktopManager> = unsafe {
         CoCreateInstance(&VirtualDesktopManager, None, CLSCTX_INPROC_SERVER).ok()
     };
@@ -74,7 +72,12 @@ pub fn get_target_windows() -> Vec<WindowInfo> {
         );
     }
 
-    state.windows
+    let EnumState { windows, vdm, .. } = *state;
+    drop(vdm);
+    if initialized {
+        unsafe { windows::Win32::System::Com::CoUninitialize() };
+    }
+    windows
 }
 
 fn is_cloaked(hwnd: HWND) -> bool {

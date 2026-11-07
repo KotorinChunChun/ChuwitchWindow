@@ -1,5 +1,6 @@
 pub mod action;
 pub mod admin;
+mod alt_drag;
 pub mod arrange;
 pub mod commands;
 pub mod config;
@@ -186,6 +187,7 @@ pub fn run() {
 
             hotplug::start_hotplug_listener(app.handle().clone());
             hotkey::init(app.handle().clone());
+            alt_drag::init(&config::load_config());
             tray::setup_tray(app.handle())?;
 
             if hidden_launch(&args) {

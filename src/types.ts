@@ -10,6 +10,8 @@ export type AppConfig = {
   run_on_startup: boolean;
   run_as_admin: boolean;
   monitor_groups: Record<string, number>;
+  alt_drag_enabled: boolean;
+  alt_drag_follow_neighbors: boolean;
   // v0.2 新規
   pin_hotkey: string;
   escape_hotkey: string;

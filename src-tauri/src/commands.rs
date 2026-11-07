@@ -51,6 +51,7 @@ pub fn get_config() -> config::AppConfig {
 #[tauri::command]
 pub fn save_config(new_config: config::AppConfig) -> Result<(), String> {
     config::save_config(&new_config);
+    crate::alt_drag::configure(&new_config);
     hotkey::reload_hotkeys();
     // 注意: スタートアップ登録の同期はフロントエンドから直接 sync_admin_startup を呼ぶ
     Ok(())
@@ -70,7 +71,9 @@ pub fn clear_app_logs_cmd() -> Result<(), String> {
 pub fn reset_config_cmd() -> Result<config::AppConfig, String> {
     config::reset_config();
     hotkey::reload_hotkeys();
-    Ok(config::load_config())
+    let config = config::load_config();
+    crate::alt_drag::configure(&config);
+    Ok(config)
 }
 
 #[tauri::command]
@@ -186,6 +189,7 @@ pub fn import_config_cmd(path: String) -> Result<config::AppConfig, String> {
     let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let (new_config, _) = config::parse_config_json(&json).map_err(|e| e.to_string())?;
     config::save_config(&new_config);
+    crate::alt_drag::configure(&new_config);
     Ok(new_config)
 }
 

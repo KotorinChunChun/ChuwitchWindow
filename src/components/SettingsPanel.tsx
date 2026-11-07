@@ -154,6 +154,19 @@ export function SettingsPanel({
                         <h3 className="text-xl font-medium text-slate-200 mb-4 border-b border-slate-800 pb-2">動作設定</h3>
                         <div className="space-y-4">
                             <ToggleOption
+                                label="Alt＋左ドラッグでウィンドウを移動"
+                                tooltip="Altを押したまま、移動したいウィンドウの中で左ドラッグします。"
+                                checked={config.alt_drag_enabled}
+                                onChange={(v) => updateConfig({ alt_drag_enabled: v })}
+                            />
+                            <ToggleOption
+                                label="隣接ウィンドウを吸着して一緒に移動"
+                                tooltip="Alt＋左ドラッグ中に、開始時と同じモニターにあるウィンドウの辺が近づくと、一緒に移動します。"
+                                checked={config.alt_drag_follow_neighbors}
+                                disabled={!config.alt_drag_enabled}
+                                onChange={(v) => updateConfig({ alt_drag_follow_neighbors: v })}
+                            />
+                            <ToggleOption
                                 label="グループ内で入れ替えを行う"
                                 description="ONの場合、増加・減少方向へのシフト時に同じグループのモニタ間のみで入れ替えを行います"
                                 checked={config.swap_within_groups}
@@ -362,14 +375,17 @@ export function SettingsPanel({
     );
 }
 
-function ToggleOption({ label, description, checked, disabled, onChange }: { label: string; description?: string; checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
+function ToggleOption({ label, description, tooltip, checked, disabled, onChange }: { label: string; description?: string; tooltip?: string; checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
     return (
-        <div className={cn("flex items-center justify-between p-4 bg-slate-900/50 rounded-xl border border-slate-800", disabled && "opacity-50 grayscale")}>
+        <div title={tooltip} className={cn("flex items-center justify-between p-4 bg-slate-900/50 rounded-xl border border-slate-800", disabled && "opacity-50 grayscale")}>
             <div className="pr-4">
                 <div className="text-base font-medium text-slate-200">{label}</div>
                 {description && <div className="text-sm text-slate-500 mt-1">{description}</div>}
             </div>
             <button
+                role="switch"
+                aria-label={label}
+                aria-checked={checked}
                 disabled={disabled}
                 onClick={() => !disabled && onChange(!checked)}
                 className={cn(
