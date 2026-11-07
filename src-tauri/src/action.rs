@@ -22,7 +22,15 @@ pub fn parse_cli_actions(args: &[String]) -> Result<Vec<Action>, ParseError> {
     while i < args.len() {
         let a = args[i].as_str();
         match a {
-            "--autostart" | "--hide" | "-hide" => {}
+            "--startup" | "--autostart" | "--hidden" | "--hide" | "-hide" => {}
+            "--launch-origin" => {
+                i += 1;
+                if args.get(i).is_none_or(|origin| origin.starts_with('-')) {
+                    return Err(ParseError {
+                        message: "--launch-origin requires a value".into(),
+                    });
+                }
+            }
             "--rotate-cw" | "--shift-next" => actions.push(Action::Rotate { clockwise: true }),
             "--rotate-ccw" | "--shift-prev" => actions.push(Action::Rotate { clockwise: false }),
             "--undo" => actions.push(Action::Undo),

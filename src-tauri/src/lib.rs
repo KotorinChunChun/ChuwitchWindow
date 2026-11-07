@@ -8,44 +8,45 @@ pub mod hotkey;
 pub mod hotplug;
 pub mod logger;
 pub mod logic;
+mod management;
 pub mod monitor;
 pub mod pin;
 pub mod rule;
 pub mod tray;
 pub mod window;
+mod window_title;
 
 #[cfg(test)]
 pub mod test_support;
 
 use tauri::{AppHandle, Manager};
+use window_title::WindowTitle;
 
 pub fn show_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_always_on_top(true);
-        let _ = window.set_always_on_top(false);
-        let _ = window.set_focus();
-    } else {
-        // ウィンドウが存在しなければ再生成
-        if let Ok(builder) = tauri::WebviewWindowBuilder::new(
+    let _ = open_main_window(app);
+}
+
+fn open_main_window(app: &AppHandle) -> tauri::Result<()> {
+    let window = match app.get_webview_window("main") {
+        Some(window) => window,
+        None => tauri::WebviewWindowBuilder::new(
             app,
             "main",
             tauri::WebviewUrl::App("index.html".into()),
         )
-        .title("ChuwitchWindow 設定")
         .inner_size(800.0, 600.0)
         .resizable(true)
-        .visible(true)
-        .build()
-        {
-            let _ = builder.set_always_on_top(true);
-            let _ = builder.set_always_on_top(false);
-            let _ = builder.set_focus();
-            // maximizedはビルド後に適用させる必要がある場合があるため
-            let _ = builder.maximize();
-        }
-    }
+        .maximized(true)
+        .visible(false)
+        .build()?,
+    };
+    window.set_title(&WindowTitle::create(""))?;
+    window.show()?;
+    let _ = window.unminimize();
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_always_on_top(false);
+    let _ = window.set_focus();
+    Ok(())
 }
 
 /// arrange ウィンドウのデフォルトサイズ
@@ -96,7 +97,7 @@ pub fn show_arrange_window(app: &AppHandle) {
             "arrange",
             tauri::WebviewUrl::App("index.html#arrange".into()),
         )
-        .title("ChuwitchWindow 整列選択")
+        .title(WindowTitle::create("整列選択"))
         .inner_size(ARRANGE_WINDOW_WIDTH, ARRANGE_WINDOW_HEIGHT)
         .decorations(false)
         .always_on_top(true)
@@ -151,6 +152,15 @@ fn dispatch_cli_action(
     crate::action::dispatch_cli_action(app, args)
 }
 
+fn hidden_launch(args: &[String]) -> bool {
+    args.iter().skip(1).any(|arg| {
+        matches!(
+            arg.as_str(),
+            "--startup" | "--autostart" | "--hidden" | "--hide" | "-hide"
+        )
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -176,19 +186,19 @@ pub fn run() {
 
             hotplug::start_hotplug_listener(app.handle().clone());
             hotkey::init(app.handle().clone());
-            let _ = tray::setup_tray(app.handle());
+            tray::setup_tray(app.handle())?;
 
-            // 引数に --autostart, --hide, -hide が含まれていない場合のみウィンドウを表示（GUIからの通常起動）
-            if !args.contains(&"--autostart".to_string())
-                && !args.contains(&"--hide".to_string())
-                && !args.contains(&"-hide".to_string())
-            {
-                crate::show_main_window(app.handle());
-            } else {
+            if hidden_launch(&args) {
                 // 自動起動・非表示時はメインウィンドウを破棄してメモリ削減
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.close();
                 }
+            } else {
+                open_main_window(app.handle())?;
+            }
+            // 管理窓口の失敗で単体利用を妨げず、親には準備完了を返さない。
+            if let Err(error) = management::start(app.handle().clone(), &args) {
+                tracing::warn!("管理窓口を開始できませんでした: {error}");
             }
             Ok(())
         })
@@ -198,7 +208,8 @@ pub fn run() {
             // CLIコマンドでなければ通常のGUI呼出とみなしてメイン画面を表示
             match dispatch_cli_action(app, &args) {
                 Ok(true) => {}
-                Ok(false) => crate::show_main_window(app),
+                Ok(false) if !hidden_launch(&args) => crate::show_main_window(app),
+                Ok(false) => {}
                 Err(error) => {
                     // 第二インスタンスの不正な引数で常駐中の本体を終了させない。
                     tracing::error!("第二インスタンスのCLI引数を拒否しました: {}", error.message);
@@ -260,7 +271,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, event| match event {
-            tauri::RunEvent::ExitRequested { api, .. } => {
+            tauri::RunEvent::ExitRequested { code: None, api, .. } => {
                 api.prevent_exit();
             }
             _ => {}
