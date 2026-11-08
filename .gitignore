@@ -71,3 +71,4 @@ src-tauri/build_v02.txt
 test_out.txt
 test_result.txt
 *.log
+/dev/history/*/logs/
