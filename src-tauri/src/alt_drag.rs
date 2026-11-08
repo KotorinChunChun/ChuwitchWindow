@@ -1,4 +1,5 @@
 mod layout;
+mod visibility;
 
 use crate::config::AppConfig;
 use crate::monitor::MonitorRect;
@@ -12,7 +13,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, HMONITOR, MONITORINFO,
     MONITOR_DEFAULTTONULL,
@@ -30,14 +30,14 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SetWindowPos, SetWindowsHookExW, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT, HHOOK,
     HTCAPTION, HWND_TOP, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, SMTO_ABORTIFHUNG, SMTO_ERRORONEXIT,
     SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
-    WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE,
-    WM_NCHITTEST,
+    WH_MOUSE_LL, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST,
 };
 
 const SNAP_DISTANCE: i32 = 12;
 const DRAG_DISTANCE: i32 = 4;
 const MAX_GROUP_WINDOWS: usize = 8;
-const FOLLOW_NEIGHBORS: u8 = 4;
+const MIDDLE_DRAG: u8 = 1;
+const FOLLOW_NEIGHBORS: u8 = 2;
 static ENABLED: AtomicU8 = AtomicU8::new(0);
 static OPTIONS: Mutex<Option<DragOptions>> = Mutex::new(None);
 
@@ -49,35 +49,7 @@ struct DragOptions {
     rules: RuleNode,
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum DragButton {
-    AltLeft = 1,
-    Middle = 2,
-}
-
-impl DragButton {
-    fn press(message: u32) -> Option<Self> {
-        match message {
-            WM_LBUTTONDOWN => Some(Self::AltLeft),
-            WM_MBUTTONDOWN => Some(Self::Middle),
-            _ => None,
-        }
-    }
-
-    fn released_by(self, message: u32) -> bool {
-        matches!(
-            (self, message),
-            (Self::AltLeft, WM_LBUTTONUP) | (Self::Middle, WM_MBUTTONUP)
-        )
-    }
-
-    fn enabled(self, flags: &AtomicU8) -> bool {
-        flags.load(Ordering::Acquire) & self as u8 != 0
-    }
-}
-
 struct Gesture {
-    button: DragButton,
     target: WindowKey,
     origin: POINT,
     latest: Mutex<(POINT, bool)>,
@@ -113,14 +85,11 @@ pub fn configure(config: &AppConfig) {
         rules: parse_rules(&config.exclusion_rules),
     });
     let mut enabled = 0;
-    if config.alt_drag_enabled {
-        enabled |= DragButton::AltLeft as u8;
-    }
     if config.middle_drag_enabled {
-        enabled |= DragButton::Middle as u8;
-    }
-    if config.alt_drag_follow_neighbors && enabled != 0 {
-        enabled |= FOLLOW_NEIGHBORS;
+        enabled |= MIDDLE_DRAG;
+        if config.alt_drag_follow_neighbors {
+            enabled |= FOLLOW_NEIGHBORS;
+        }
     }
     ENABLED.store(enabled, Ordering::Release);
 }
@@ -138,7 +107,12 @@ pub fn init(config: &AppConfig) {
                 group.len() > 1
             });
             match work {
-                Work::Drag(gesture) => run_gesture(&gesture, &mut groups),
+                Work::Drag(gesture) => {
+                    if ENABLED.load(Ordering::Acquire) & FOLLOW_NEIGHBORS != 0 {
+                        raise_group(&groups, gesture.target, gesture.origin);
+                    }
+                    run_gesture(&gesture, &mut groups);
+                }
                 Work::TitleClick { target, point } => {
                     if ENABLED.load(Ordering::Acquire) & FOLLOW_NEIGHBORS != 0 {
                         raise_group(&groups, target, point);
@@ -183,9 +157,8 @@ unsafe extern "system" fn mouse_hook(code: i32, message: WPARAM, data: LPARAM) -
 fn record_mouse(message: u32, point: POINT) -> bool {
     CAPTURE.with(|slot| {
         let mut capture = slot.borrow_mut();
-        let pressed = DragButton::press(message);
         if let Some(gesture) = capture.as_ref() {
-            let finished = gesture.button.released_by(message);
+            let finished = message == WM_MBUTTONUP;
             if message == WM_MOUSEMOVE || finished {
                 *gesture.latest.lock().unwrap() = (point, finished);
                 if finished {
@@ -193,17 +166,17 @@ fn record_mouse(message: u32, point: POINT) -> bool {
                 }
                 return finished;
             }
-            if pressed != Some(gesture.button) {
+            if message != WM_MBUTTONDOWN {
                 return false;
             }
             gesture.latest.lock().unwrap().1 = true;
             *capture = None;
         }
-        let Some(button) = pressed else { return false };
-        if button == DragButton::AltLeft
-            && ENABLED.load(Ordering::Acquire) & FOLLOW_NEIGHBORS != 0
-            && modifiers_match(DragButton::Middle)
-        {
+        if !matches!(message, WM_LBUTTONDOWN | WM_MBUTTONDOWN) {
+            return false;
+        }
+        let enabled = ENABLED.load(Ordering::Acquire);
+        if message == WM_LBUTTONDOWN && enabled & FOLLOW_NEIGHBORS != 0 && unmodified() {
             let hwnd = unsafe { GetAncestor(WindowFromPoint(point), GA_ROOT) };
             let pid = window_pid(hwnd);
             if pid != 0 && pid != std::process::id() {
@@ -214,7 +187,7 @@ fn record_mouse(message: u32, point: POINT) -> bool {
             }
             return false;
         }
-        if !button.enabled(&ENABLED) || !modifiers_match(button) {
+        if message != WM_MBUTTONDOWN || enabled & MIDDLE_DRAG == 0 || !unmodified() {
             return false;
         }
         let hwnd = unsafe { GetAncestor(WindowFromPoint(point), GA_ROOT) };
@@ -228,7 +201,6 @@ fn record_mouse(message: u32, point: POINT) -> bool {
             return false;
         }
         let gesture = Arc::new(Gesture {
-            button,
             target: WindowKey {
                 hwnd: hwnd.0,
                 pid: window_pid(hwnd),
@@ -254,12 +226,11 @@ fn send_work(work: Work) -> bool {
     })
 }
 
-fn modifiers_match(button: DragButton) -> bool {
+fn unmodified() -> bool {
     let held = |key: u16| unsafe { GetAsyncKeyState(key.into()) } < 0;
-    held(VK_MENU.0) == (button == DragButton::AltLeft)
-        && ![VK_CONTROL, VK_SHIFT, VK_LWIN, VK_RWIN]
-            .iter()
-            .any(|key| held(key.0))
+    ![VK_MENU, VK_CONTROL, VK_SHIFT, VK_LWIN, VK_RWIN]
+        .iter()
+        .any(|key| held(key.0))
 }
 
 fn normal_window(hwnd: HWND) -> bool {
@@ -295,23 +266,11 @@ impl DragWindow {
         if pid == 0 || unsafe { GetWindowRect(hwnd, &mut raw) }.is_err() {
             return None;
         }
-        let mut frame = raw;
-        let visible_frame = unsafe {
-            DwmGetWindowAttribute(
-                hwnd,
-                DWMWA_EXTENDED_FRAME_BOUNDS,
-                (&mut frame as *mut RECT).cast(),
-                std::mem::size_of::<RECT>() as u32,
-            )
-        };
-        if visible_frame.is_err() || frame.left >= frame.right || frame.top >= frame.bottom {
-            frame = raw;
-        }
         Some(Self {
             hwnd,
             pid,
             raw: raw.into(),
-            frame: frame.into(),
+            frame: visibility::visible_frame(hwnd).unwrap_or_else(|| raw.into()),
         })
     }
 
@@ -385,6 +344,12 @@ fn run_gesture(gesture: &Gesture, groups: &mut Vec<Vec<WindowKey>>) {
     };
     let lead = windows.remove(index);
     let mut members = if options.follow {
+        let visibility = visibility::Visibility::capture();
+        let lead_is_visible = visibility.has_visible_half(lead.hwnd);
+        windows.retain(|candidate| {
+            previous.contains(&candidate.key())
+                || lead_is_visible && visibility.has_visible_half(candidate.hwnd)
+        });
         collect_group(lead, windows, previous)
     } else {
         vec![lead]
@@ -493,7 +458,7 @@ fn track_gesture(
     let mut last = (0, 0);
     let mut dragging = false;
     // フックが押下を消費するため、ボタンの状態はフックで受け取ったイベントで追跡する。
-    while gesture.button.enabled(enabled) {
+    while enabled.load(Ordering::Acquire) & MIDDLE_DRAG != 0 {
         let (point, finished) = *gesture.latest.lock().unwrap();
         let offset = (point.x - gesture.origin.x, point.y - gesture.origin.y);
         if (offset != last || finished && dragging)
@@ -584,11 +549,7 @@ mod tests {
     #[test]
     fn drag_is_opt_in_and_windows_accepts_the_mouse_hook() {
         let config: AppConfig = serde_json::from_str("{}").unwrap();
-        assert!(
-            !config.alt_drag_enabled
-                && !config.middle_drag_enabled
-                && !config.alt_drag_follow_neighbors
-        );
+        assert!(!config.middle_drag_enabled && !config.alt_drag_follow_neighbors);
         assert!(config.drag_snap_to_work_area && config.drag_resize_across_monitors);
         let hook = install_hook().expect("Windowsのマウスフックを登録");
         unsafe { UnhookWindowsHookEx(hook) }.expect("試験フックを解除");
@@ -596,28 +557,12 @@ mod tests {
 
     #[test]
     fn captured_drag_processes_multiple_moves_and_the_release_position() {
-        assert_drag_moves(
-            DragButton::AltLeft,
-            WM_LBUTTONUP,
-            WM_MBUTTONUP,
-            POINT { x: 25, y: 20 },
-        );
-        assert_drag_moves(
-            DragButton::Middle,
-            WM_MBUTTONUP,
-            WM_LBUTTONUP,
-            POINT { x: 20, y: 15 },
-        );
+        assert_drag_moves(POINT { x: 25, y: 20 });
+        assert_drag_moves(POINT { x: 20, y: 15 });
     }
 
-    fn assert_drag_moves(
-        button: DragButton,
-        release: u32,
-        other_release: u32,
-        release_point: POINT,
-    ) {
+    fn assert_drag_moves(release_point: POINT) {
         let gesture = Arc::new(Gesture {
-            button,
             target: WindowKey { hwnd: 0, pid: 0 },
             origin: POINT { x: 0, y: 0 },
             latest: Mutex::new((POINT { x: 0, y: 0 }, false)),
@@ -625,16 +570,16 @@ mod tests {
         CAPTURE.with(|slot| slot.replace(Some(gesture.clone())));
         assert!(!record_mouse(WM_MOUSEMOVE, POINT { x: 10, y: 5 }));
 
-        let enabled = AtomicU8::new(button as u8);
+        let enabled = AtomicU8::new(MIDDLE_DRAG);
         let mut moves = Vec::new();
         track_gesture(&gesture, &enabled, |point, finished| {
             moves.push((point.x, point.y, finished));
             match moves.len() {
                 1 => {
-                    assert!(!record_mouse(other_release, POINT { x: 99, y: 99 }));
+                    assert!(!record_mouse(WM_LBUTTONDOWN, POINT { x: 99, y: 99 }));
                     assert!(!record_mouse(WM_MOUSEMOVE, POINT { x: 20, y: 15 }));
                 }
-                2 => assert!(record_mouse(release, release_point)),
+                2 => assert!(record_mouse(WM_MBUTTONUP, release_point)),
                 _ => {}
             }
             true

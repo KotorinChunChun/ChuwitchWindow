@@ -28,7 +28,6 @@ export function createConfig(partial?: Partial<AppConfig>): AppConfig {
     run_on_startup: false,
     run_as_admin: false,
     monitor_groups: {},
-    alt_drag_enabled: false,
     middle_drag_enabled: false,
     alt_drag_follow_neighbors: false,
     drag_snap_to_work_area: true,

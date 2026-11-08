@@ -154,12 +154,6 @@ export function SettingsPanel({
                         <h3 className="text-xl font-medium text-slate-200 mb-4 border-b border-slate-800 pb-2">動作設定</h3>
                         <div className="space-y-4">
                             <ToggleOption
-                                label="Alt＋左ドラッグでウィンドウを移動"
-                                tooltip="Altを押したまま、移動したいウィンドウの中で左ドラッグします。"
-                                checked={config.alt_drag_enabled}
-                                onChange={(v) => updateConfig({ alt_drag_enabled: v })}
-                            />
-                            <ToggleOption
                                 label="中ボタンドラッグでウィンドウを移動"
                                 tooltip="修飾キーを押さずに、ウィンドウ内を中ボタンでドラッグします。有効時は対象ウィンドウ内の中クリックを移動操作が使います。"
                                 checked={config.middle_drag_enabled}
@@ -167,23 +161,23 @@ export function SettingsPanel({
                             />
                             <ToggleOption
                                 label="隣接ウィンドウを吸着して一緒に移動"
-                                tooltip="ドラッグ開始時に隣接するウィンドウを最大8枚までまとめ、並びを保って移動します。グループのタイトルバーをクリックすると全体が前面に出ます。"
+                                tooltip="ドラッグ開始時に面積の50%以上が見えている隣接ウィンドウを最大8枚までまとめます。グループのタイトルバーを中クリックすると全体が前面に出ます。"
                                 checked={config.alt_drag_follow_neighbors}
-                                disabled={!config.alt_drag_enabled && !config.middle_drag_enabled}
+                                disabled={!config.middle_drag_enabled}
                                 onChange={(v) => updateConfig({ alt_drag_follow_neighbors: v })}
                             />
                             <ToggleOption
                                 label="ドラッグ時に作業領域の端へ吸着"
                                 tooltip="ウィンドウまたはグループの外周が、タスクバーを除く作業領域の端から20物理ピクセル以内に近づくと吸着します。"
                                 checked={config.drag_snap_to_work_area}
-                                disabled={!config.alt_drag_enabled && !config.middle_drag_enabled}
+                                disabled={!config.middle_drag_enabled}
                                 onChange={(v) => updateConfig({ drag_snap_to_work_area: v })}
                             />
                             <ToggleOption
                                 label="解像度の異なるモニターでサイズを調整"
                                 tooltip="別の解像度のモニターでドラッグを終えると、移動先の作業領域に合わせてサイズを調整します。"
                                 checked={config.drag_resize_across_monitors}
-                                disabled={!config.alt_drag_enabled && !config.middle_drag_enabled}
+                                disabled={!config.middle_drag_enabled}
                                 onChange={(v) => updateConfig({ drag_resize_across_monitors: v })}
                             />
                             <ToggleOption

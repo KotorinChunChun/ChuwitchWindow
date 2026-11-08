@@ -10,7 +10,6 @@ export type AppConfig = {
   run_on_startup: boolean;
   run_as_admin: boolean;
   monitor_groups: Record<string, number>;
-  alt_drag_enabled: boolean;
   middle_drag_enabled: boolean;
   alt_drag_follow_neighbors: boolean;
   drag_snap_to_work_area: boolean;
