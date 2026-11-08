@@ -13,7 +13,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     }),
 }));
 
-it("Altドラッグを有効にした場合だけ追従を設定でき、再有効化で選択を保持する", async () => {
+it("Altドラッグと中ドラッグは独立し、どちらでも追従の選択を使える", async () => {
     function Fixture() {
         const [config, setConfig] = useState(createConfig());
         return <SettingsPanel config={config} isAdmin onChange={setConfig}
@@ -22,6 +22,7 @@ it("Altドラッグを有効にした場合だけ追従を設定でき、再有�
 
     render(<Fixture />);
     const move = screen.getByRole("switch", { name: "Alt＋左ドラッグでウィンドウを移動" });
+    const middle = screen.getByRole("switch", { name: "中ボタンドラッグでウィンドウを移動" });
     const follow = screen.getByRole("switch", { name: "隣接ウィンドウを吸着して一緒に移動" });
     expect(follow).toBeDisabled();
     fireEvent.click(move);
@@ -29,7 +30,8 @@ it("Altドラッグを有効にした場合だけ追従を設定でき、再有�
     expect(follow).toBeChecked();
     fireEvent.click(move);
     expect(follow).toBeDisabled();
-    fireEvent.click(move);
+    fireEvent.click(middle);
     await waitFor(() => expect(follow).toBeEnabled());
     expect(follow).toBeChecked();
+    expect(move).not.toBeChecked();
 });

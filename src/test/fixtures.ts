@@ -29,6 +29,7 @@ export function createConfig(partial?: Partial<AppConfig>): AppConfig {
     run_as_admin: false,
     monitor_groups: {},
     alt_drag_enabled: false,
+    middle_drag_enabled: false,
     alt_drag_follow_neighbors: false,
     pin_hotkey: "Win+Ctrl+Alt+P",
     escape_hotkey: "Win+Ctrl+Alt+E",

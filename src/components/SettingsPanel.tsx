@@ -160,10 +160,16 @@ export function SettingsPanel({
                                 onChange={(v) => updateConfig({ alt_drag_enabled: v })}
                             />
                             <ToggleOption
+                                label="中ボタンドラッグでウィンドウを移動"
+                                tooltip="修飾キーを押さずに、ウィンドウ内を中ボタンでドラッグします。有効時は対象ウィンドウ内の中クリックを移動操作が使います。"
+                                checked={config.middle_drag_enabled}
+                                onChange={(v) => updateConfig({ middle_drag_enabled: v })}
+                            />
+                            <ToggleOption
                                 label="隣接ウィンドウを吸着して一緒に移動"
-                                tooltip="Alt＋左ドラッグ中に、開始時と同じモニターにあるウィンドウの辺が近づくと、一緒に移動します。"
+                                tooltip="開始時と同じモニターにある隣接ウィンドウを吸着し、ドラッグしたウィンドウを含め最大4枚を一緒に動かします。"
                                 checked={config.alt_drag_follow_neighbors}
-                                disabled={!config.alt_drag_enabled}
+                                disabled={!config.alt_drag_enabled && !config.middle_drag_enabled}
                                 onChange={(v) => updateConfig({ alt_drag_follow_neighbors: v })}
                             />
                             <ToggleOption

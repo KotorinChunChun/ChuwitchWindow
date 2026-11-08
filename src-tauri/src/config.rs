@@ -26,6 +26,7 @@ pub struct AppConfig {
     pub run_as_admin: bool,
     pub monitor_groups: HashMap<String, u8>,
     pub alt_drag_enabled: bool,
+    pub middle_drag_enabled: bool,
     pub alt_drag_follow_neighbors: bool,
 
     // --- v0.2 新規フィールド ---
@@ -58,6 +59,7 @@ impl Default for AppConfig {
             run_as_admin: false,
             monitor_groups: HashMap::new(),
             alt_drag_enabled: false,
+            middle_drag_enabled: false,
             alt_drag_follow_neighbors: false,
             // v0.2 新規
             pin_hotkey: "Win+Ctrl+Alt+P".to_string(),
