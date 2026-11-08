@@ -16,7 +16,7 @@ use windows::Win32::UI::HiDpi::{
     SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, VK_CONTROL, VK_LBUTTON, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+    GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetAncestor, GetMessageW, GetShellWindow, GetWindowRect, GetWindowTextLengthW,
@@ -242,27 +242,36 @@ fn run_gesture(gesture: &Gesture) {
     };
     let lead = windows.swap_remove(index);
     let mut followers = Vec::new();
+    track_gesture(gesture, &ENABLED, |offset, first_move| {
+        if !lead.move_by(offset) {
+            return false;
+        }
+        if first_move {
+            attach(&lead.frame, (0, 0), &mut windows, &mut followers);
+        }
+        attach(&lead.frame, offset, &mut windows, &mut followers);
+        followers
+            .retain(|(window, anchor)| window.move_by((offset.0 + anchor.0, offset.1 + anchor.1)));
+        true
+    });
+}
+
+fn track_gesture(
+    gesture: &Gesture,
+    enabled: &AtomicBool,
+    mut move_to: impl FnMut(Offset, bool) -> bool,
+) {
     let mut last = (0, 0);
     let mut dragging = false;
-    while ENABLED.load(Ordering::Acquire) {
+    // フックが押下を消費するため、ボタンの状態はフックで受け取ったイベントで追跡する。
+    while enabled.load(Ordering::Acquire) {
         let (point, finished) = *gesture.latest.lock().unwrap();
-        // デスクトップの切替などでボタンを離した通知を受け取れない場合に備える。
-        if dragging && !finished && unsafe { GetAsyncKeyState(VK_LBUTTON.0.into()) } >= 0 {
-            break;
-        }
         let offset = (point.x - gesture.origin.x, point.y - gesture.origin.y);
         if offset != last && (dragging || offset.0.abs().max(offset.1.abs()) >= DRAG_DISTANCE) {
-            if !lead.move_by(offset) {
+            if !move_to(offset, !dragging) {
                 return;
             }
-            if !dragging {
-                attach(&lead.frame, (0, 0), &mut windows, &mut followers);
-                dragging = true;
-            }
-            attach(&lead.frame, offset, &mut windows, &mut followers);
-            followers.retain(|(window, anchor)| {
-                window.move_by((offset.0 + anchor.0, offset.1 + anchor.1))
-            });
+            dragging = true;
             last = offset;
         }
         if finished {
@@ -331,6 +340,35 @@ mod tests {
         assert!(!config.alt_drag_enabled && !config.alt_drag_follow_neighbors);
         let hook = install_hook().expect("Windowsのマウスフックを登録");
         unsafe { UnhookWindowsHookEx(hook) }.expect("試験フックを解除");
+    }
+
+    #[test]
+    fn captured_drag_processes_multiple_moves_and_the_release_position() {
+        let gesture = Arc::new(Gesture {
+            target: 0,
+            origin: POINT { x: 0, y: 0 },
+            latest: Mutex::new((POINT { x: 0, y: 0 }, false)),
+        });
+        CAPTURE.with(|slot| slot.replace(Some(gesture.clone())));
+        assert!(!record_mouse(WM_MOUSEMOVE, POINT { x: 10, y: 5 }));
+
+        let enabled = AtomicBool::new(true);
+        let mut moves = Vec::new();
+        track_gesture(&gesture, &enabled, |offset, first_move| {
+            moves.push((offset, first_move));
+            match moves.len() {
+                1 => assert!(!record_mouse(WM_MOUSEMOVE, POINT { x: 20, y: 15 })),
+                2 => assert!(record_mouse(WM_LBUTTONUP, POINT { x: 25, y: 20 })),
+                _ => {}
+            }
+            true
+        });
+
+        assert_eq!(
+            moves,
+            [((10, 5), true), ((20, 15), false), ((25, 20), false)]
+        );
+        assert!(!record_mouse(WM_MOUSEMOVE, POINT { x: 30, y: 30 }));
     }
 
     #[test]
