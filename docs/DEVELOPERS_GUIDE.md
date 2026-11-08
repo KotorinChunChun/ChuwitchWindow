@@ -56,6 +56,17 @@ KotorinToysに収録された開発版では、ChuwitchWindowのディレクト�
 
 CLIは物理マウス・キーボード、モニター着脱、通知領域のシェル表示、UACダイアログを代替入力や試験用の実装で扱います。利用者のウィンドウ配置、画面構成、タスク登録、ユーザーPATHを使った実機確認とは区別します。
 
+### 2画面の配置計画だけを検証する
+
+ChuwitchWindowのディレクトリから、既存のCargo試験をケース名で指定します。2画面と架空の窓IDを使い、通常の `--shift-next`、`--swap=2`、`--arrange=grid` と同じ引数解釈・対象判定・座標計算を通します。アプリの起動、ウィンドウの作成・移動、設定や履歴の読み書きは行いません。
+
+```powershell
+cargo test --locked --manifest-path src-tauri/Cargo.toml --lib logic::tests::plans_placement_for_two_sample_displays_without_touching_windows -- --exact --nocapture
+cargo test --locked --manifest-path src-tauri/Cargo.toml --lib arrange::tests::plans_grid_on_selected_sample_display_without_touching_windows -- --exact --nocapture
+```
+
+巡回の試験は、設定したモニター順位と未設定時の左からの順序、プライマリの選択、同一・異なるグループ、ピン留め・除外条件、画面をまたぐ窓の所属と前後順を判定します。整列の試験は、選んだ画面だけを対象にし、ピン留め・除外・固定サイズの窓を避ける配置を判定します。どちらも計画の座標を表示し、期待値と違えば非ゼロで終了します。既存の `-Feature MonitorMovement` と `-Feature Arrange` にも必須ケースとして含まれます。
+
 ## プロジェクト構成
 
 ```

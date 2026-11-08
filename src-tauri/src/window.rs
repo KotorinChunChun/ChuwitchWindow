@@ -535,7 +535,7 @@ fn restore_foreground(previous: HWND, rdp: HWND) {
     }
 }
 
-fn calculate_target_rect(
+pub(crate) fn calculate_target_rect(
     win: &WindowInfo,
     src_monitor: &crate::monitor::MonitorInfo,
     dest_monitor: &crate::monitor::MonitorInfo,

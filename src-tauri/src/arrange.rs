@@ -74,6 +74,29 @@ fn arrange_windows(app: &tauri::AppHandle, arrange_type: ArrangeType, stored_hmo
     let all_windows = crate::window::get_target_windows();
     info!("[arrange] get_target_windows() で取得したウィンドウ数: {}", all_windows.len());
     
+    let Some((targets, available_area)) = plan_arrangement(
+        all_windows,
+        target_monitor,
+        &parsed_rules,
+        crate::pin::is_pinned,
+    ) else {
+        return;
+    };
+
+    let history_state = app.state::<HistoryState>();
+    apply_arrangement(&history_state, &targets, &available_area, arrange_type);
+    info!("[arrange] 完了: {} 件を整列 / モニター={} / 使用エリア=({},{})–({},{})",
+        targets.len(), target_monitor.name,
+        available_area.left, available_area.top,
+        available_area.right, available_area.bottom);
+}
+
+fn plan_arrangement(
+    all_windows: Vec<WindowInfo>,
+    target_monitor: &MonitorInfo,
+    rules: &crate::rule::RuleNode,
+    pinned: impl Fn(isize) -> bool,
+) -> Option<(Vec<WindowInfo>, MonitorRect)> {
     // 2. ターゲットモニター上のウィンドウを「固定（障害物）」と「移動対象」に分ける
     let mut obstacles = Vec::new();
     let mut targets = Vec::new();
@@ -99,8 +122,8 @@ fn arrange_windows(app: &tauri::AppHandle, arrange_type: ArrangeType, stored_hmo
             || (win.style & WS_MAXIMIZEBOX) != 0
             || (win.style & WS_MINIMIZEBOX) != 0;
 
-        let is_pinned   = crate::pin::is_pinned(win.hwnd);
-        let is_excluded = crate::rule::is_excluded(&win, &parsed_rules);
+        let is_pinned = pinned(win.hwnd);
+        let is_excluded = crate::rule::is_excluded(&win, rules);
 
         if is_pinned || is_excluded || !is_resizable {
             let reason = if is_pinned       { "ピン留め" }
@@ -124,7 +147,7 @@ fn arrange_windows(app: &tauri::AppHandle, arrange_type: ArrangeType, stored_hmo
 
     if targets.is_empty() {
         info!("[arrange] 移動対象ウィンドウが0件のため整列を中断");
-        return;
+        return None;
     }
 
     // Zオーダーを反転させる (EnumWindows は前面から列挙するため)
@@ -134,7 +157,7 @@ fn arrange_windows(app: &tauri::AppHandle, arrange_type: ArrangeType, stored_hmo
 
     // 3. 障害物を避けた有効な空き領域の計算
     let mut available_area = target_monitor.work_area.clone();
-    
+
     // 単純化のため、障害物が存在する場合は、障害物の境界から
     // 最も面積が広くなるように available_area を削る簡易アルゴリズム
     for obs in &obstacles {
@@ -142,7 +165,7 @@ fn arrange_windows(app: &tauri::AppHandle, arrange_type: ArrangeType, stored_hmo
         if intersect(&available_area, &obs.rect) {
             // 4つの候補（上、下、左、右の空きスペース）を作成して最大のものを選ぶ
             let mut candidates = Vec::new();
-            
+
             // 上側の空きスペース
             if obs.rect.top > available_area.top {
                 candidates.push(MonitorRect {
@@ -179,20 +202,15 @@ fn arrange_windows(app: &tauri::AppHandle, arrange_type: ArrangeType, stored_hmo
                     bottom: available_area.bottom,
                 });
             }
-            
+
             // 最大面積の候補を新しい available_area とする
             if let Some(best) = candidates.iter().max_by_key(|r| area(r)) {
                 available_area = best.clone();
             }
         }
     }
-    
-    let history_state = app.state::<HistoryState>();
-    apply_arrangement(&history_state, &targets, &available_area, arrange_type);
-    info!("[arrange] 完了: {} 件を整列 / モニター={} / 使用エリア=({},{})–({},{})",
-        targets.len(), target_monitor.name,
-        available_area.left, available_area.top,
-        available_area.right, available_area.bottom);
+
+    Some((targets, available_area))
 }
 
 fn apply_arrangement(history: &HistoryState, targets: &[WindowInfo], area: &MonitorRect, arrange_type: ArrangeType) {
@@ -325,6 +343,37 @@ fn calculate_layout(targets: &[WindowInfo], area: &MonitorRect, arrange_type: Ar
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn plans_grid_on_selected_sample_display_without_touching_windows() {
+        use crate::action::{parse_cli_actions, Action};
+        use crate::test_support::{dual_setup, WindowBuilder};
+
+        let mut monitors = dual_setup();
+        monitors[1].work_area.bottom = 1040;
+        let resizable = 0x00040000;
+        let windows = vec![
+            WindowBuilder::new(1).rect(2350, 200, 2850, 600).style(resizable).build(),
+            WindowBuilder::new(2).rect(100, 100, 600, 500).style(resizable).build(),
+            WindowBuilder::new(3).rect(3000, 250, 3500, 650).style(resizable).build(),
+            WindowBuilder::new(4).rect(1920, 0, 3840, 140).style(resizable).build(),
+            WindowBuilder::new(5).process("blocked.exe").rect(1920, 940, 3840, 1040).style(resizable).build(),
+            WindowBuilder::new(6).rect(1920, 140, 2160, 940).build(),
+        ];
+        let rules = crate::rule::parse_rules(r#"{"type":"rule","conditions":[{"field":"process_name","operator":"equals","value":"blocked.exe"}]}"#);
+        let args = ["chuwitchwindow".into(), "--arrange=grid".into()];
+        let actions = parse_cli_actions(&args).unwrap();
+        let [Action::ArrangeNow(kind)] = actions.as_slice() else {
+            panic!("整列コマンドが不正");
+        };
+        let (targets, area) = plan_arrangement(windows, &monitors[1], &rules, |hwnd| hwnd == 4).unwrap();
+        let ids = targets.iter().map(|window| window.hwnd).collect::<Vec<_>>();
+        assert_eq!(ids, [3, 1]);
+        assert_eq!(area, rect(2160, 140, 3840, 940));
+        let placement = calculate_layout(&targets, &area, *kind);
+        assert_eq!(placement, [rect(2160, 140, 3000, 940), rect(3000, 140, 3840, 940)]);
+        println!("整列計画（背面から前面） 窓ID {ids:?}、座標 {placement:?}");
+    }
+
     #[test]
     fn all_arrange_modes_apply_expected_rectangles_to_test_windows() {
         use crate::test_support::test_window;

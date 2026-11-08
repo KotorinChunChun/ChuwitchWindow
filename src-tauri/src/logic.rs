@@ -6,6 +6,38 @@ use crate::{
 use std::collections::HashMap;
 use tauri::Manager;
 
+fn sort_rotation_monitors(monitors: &mut [MonitorInfo], order: &[String]) {
+    // 順位のないモニターは指定済みの後に左から並べる。
+    monitors.sort_by(|a, b| {
+        let pos_a = order.iter().position(|name| name == &a.name);
+        let pos_b = order.iter().position(|name| name == &b.name);
+        match (pos_a, pos_b) {
+            (Some(ia), Some(ib)) => ia.cmp(&ib),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => a.monitor_area.left.cmp(&b.monitor_area.left),
+        }
+    });
+}
+
+fn select_movable_windows(
+    windows: Vec<WindowInfo>,
+    rules: &crate::rule::RuleNode,
+    is_pinned: impl Fn(isize) -> bool,
+) -> Vec<WindowInfo> {
+    windows.into_iter().filter(|window| {
+        if is_pinned(window.hwnd) {
+            tracing::info!("Excluded by Pin: {} ({})", window.title, window.hwnd);
+            return false;
+        }
+        if crate::rule::is_excluded(window, rules) {
+            tracing::info!("Excluded by Rule: {} ({})", window.title, window.hwnd);
+            return false;
+        }
+        true
+    }).collect()
+}
+
 // --- Pure Logic for Testing ---
 pub fn group_windows_by_monitor(
     windows: &[WindowInfo],
@@ -95,34 +127,8 @@ pub fn handle_rotate(app: &tauri::AppHandle, clockwise: bool) {
     let config = crate::config::load_config();
     let parsed_rules = crate::rule::parse_rules(&config.exclusion_rules);
     
-    // config.monitor_order に基づきソート。未指定のものは末尾に（X座標でフォールバックソート）
-    monitors.sort_by(|a, b| {
-        let pos_a = config.monitor_order.iter().position(|name| name == &a.name);
-        let pos_b = config.monitor_order.iter().position(|name| name == &b.name);
-        
-        match (pos_a, pos_b) {
-            (Some(ia), Some(ib)) => ia.cmp(&ib),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => a.monitor_area.left.cmp(&b.monitor_area.left),
-        }
-    });
-    
-    let windows: Vec<WindowInfo> = get_target_windows()
-        .into_iter()
-        .filter(|w| {
-            if crate::pin::is_pinned(w.hwnd) {
-                tracing::info!("Excluded by Pin: {} ({})", w.title, w.hwnd);
-                false
-            } else { true }
-        })
-        .filter(|w| {
-            if crate::rule::is_excluded(w, &parsed_rules) {
-                tracing::info!("Excluded by Rule: {} ({})", w.title, w.hwnd);
-                false
-            } else { true }
-        })
-        .collect();
+    sort_rotation_monitors(&mut monitors, &config.monitor_order);
+    let windows = select_movable_windows(get_target_windows(), &parsed_rules, crate::pin::is_pinned);
     if windows.is_empty() {
         return;
     }
@@ -191,21 +197,7 @@ pub fn handle_swap_target(app: &tauri::AppHandle, target_num: u32) {
     };
     let parsed_rules = crate::rule::parse_rules(&config.exclusion_rules);
 
-    let windows: Vec<WindowInfo> = get_target_windows()
-        .into_iter()
-        .filter(|w| {
-            if crate::pin::is_pinned(w.hwnd) {
-                tracing::info!("Excluded by Pin: {} ({})", w.title, w.hwnd);
-                false
-            } else { true }
-        })
-        .filter(|w| {
-            if crate::rule::is_excluded(w, &parsed_rules) {
-                tracing::info!("Excluded by Rule: {} ({})", w.title, w.hwnd);
-                false
-            } else { true }
-        })
-        .collect();
+    let windows = select_movable_windows(get_target_windows(), &parsed_rules, crate::pin::is_pinned);
     if windows.is_empty() {
         return;
     }
@@ -303,7 +295,80 @@ pub fn handle_gather(app: &tauri::AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{dual_setup, monitor_1920, test_window, WindowBuilder};
+    use crate::config::AppConfig;
+    use crate::test_support::{dual_setup, monitor_1920, rect, test_window, WindowBuilder};
+
+    #[test]
+    fn plans_placement_for_two_sample_displays_without_touching_windows() {
+        use crate::action::{parse_cli_actions, Action};
+        use crate::window::calculate_target_rect;
+
+        let mut left = monitor_1920("SampleDisplay1", -1920);
+        left.is_primary = true;
+        left.display_number = 1;
+        left.work_area.bottom = 1040;
+        let mut right = monitor_1920("SampleDisplay2", 0);
+        right.is_primary = false;
+        right.display_number = 2;
+        right.monitor_area = rect(0, 0, 1280, 720);
+        right.work_area = rect(0, 20, 1280, 700);
+        let mut monitors = [right, left];
+        sort_rotation_monitors(&mut monitors, &[]);
+        assert_eq!(monitors.each_ref().map(|monitor| monitor.display_number), [1, 2]);
+
+        let mut config = AppConfig {
+            monitor_order: vec!["SampleDisplay2".into()],
+            primary_monitor_id: Some("SampleDisplay2".into()),
+            monitor_groups: HashMap::from([("SampleDisplay1".into(), 1), ("SampleDisplay2".into(), 2)]),
+            swap_within_groups: true,
+            exclusion_rules: r#"{"type":"rule","conditions":[{"field":"process_name","operator":"wildcard","value":"blocked*.exe"}]}"#.into(),
+            ..AppConfig::default()
+        };
+        sort_rotation_monitors(&mut monitors, &config.monitor_order);
+        assert_eq!(monitors.each_ref().map(|monitor| monitor.display_number), [2, 1]);
+
+        // EnumWindowsと同じ前面から背面の順で、存在しないハンドルだけを渡す。
+        let samples = vec![
+            WindowBuilder::new(1).rect(-1720, 200, -1420, 500).build(),
+            WindowBuilder::new(2).rect(300, 180, 600, 480).build(),
+            WindowBuilder::new(3).rect(-420, 420, 180, 600).build(),
+            WindowBuilder::new(4).rect(400, 260, 700, 550).build(),
+            WindowBuilder::new(5).process("BlockedViewer.EXE").rect(-800, 300, -500, 600).build(),
+            WindowBuilder::new(6).rect(0, 20, 640, 700).build(),
+        ];
+        let rules = crate::rule::parse_rules(&config.exclusion_rules);
+        let selected = select_movable_windows(samples, &rules, |hwnd| hwnd == 4);
+        assert_eq!(selected.iter().map(|window| window.hwnd).collect::<Vec<_>>(), [1, 2, 3, 6]);
+        let by_monitor = group_windows_by_monitor(&selected, &monitors);
+        let ids = |index: usize| by_monitor[index].iter().map(|window| window.hwnd).collect::<Vec<_>>();
+        assert_eq!(ids(0), [2, 6]);
+        assert_eq!(ids(1), [1, 3]);
+
+        let parse = |argument: &str| parse_cli_actions(&["chuwitchwindow".into(), argument.into()]).unwrap().remove(0);
+        let Action::Rotate { clockwise } = parse("--shift-next") else { panic!("巡回コマンドが不正") };
+        let Action::Swap { target } = parse("--swap=2") else { panic!("入れ替えコマンドが不正") };
+        assert_eq!(swap_pair(&monitors, None, target), Some((1, 0)));
+        assert_eq!(swap_pair(&monitors, config.primary_monitor_id.as_deref(), target), None);
+        assert!(rotate_routes(&monitors, Some(&config.monitor_groups), clockwise).is_empty());
+        assert_eq!(rotate_routes(&monitors, None, clockwise), [(0, 1), (1, 0)]);
+        config.monitor_groups.insert("SampleDisplay2".into(), 1);
+        let groups = config.swap_within_groups.then_some(&config.monitor_groups);
+
+        let mut placements = Vec::new();
+        for (source, destination) in rotate_routes(&monitors, groups, clockwise) {
+            for window in &by_monitor[source] {
+                placements.push((window.hwnd, monitors[destination].display_number,
+                    calculate_target_rect(window, &monitors[source], &monitors[destination])));
+            }
+        }
+        assert_eq!(placements, [
+            (2, 1, (-1470, 245, 450, 459)),
+            (6, 1, (-1920, 0, 960, 1040)),
+            (1, 2, (133, 151, 200, 196)),
+            (3, 2, (1000, 295, 400, 118)),
+        ]);
+        println!("配置計画（窓ID、移動先、X・Y・幅・高さ） {placements:?}");
+    }
 
     #[test]
     fn selects_routes_for_rotation_swap_escape_and_gather() {

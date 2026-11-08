@@ -32,8 +32,8 @@ $isolation = [ordered]@{
 }
 $requiredCases = [ordered]@{
     Drag = @('middle_input_from_title_moves_test_group_and_client_click_reaches_window', 'cross_monitor_drop_moves_fixed_window_without_resizing_it', 'raises_all_group_members_above_another_window_without_moving_them')
-    MonitorMovement = @('move_actions_apply_coordinates_and_undo_restores_test_windows')
-    Arrange = @('all_arrange_modes_apply_expected_rectangles_to_test_windows')
+    MonitorMovement = @('move_actions_apply_coordinates_and_undo_restores_test_windows', 'plans_placement_for_two_sample_displays_without_touching_windows')
+    Arrange = @('all_arrange_modes_apply_expected_rectangles_to_test_windows', 'plans_grid_on_selected_sample_display_without_touching_windows')
     Hotkeys = @('isolated_key_events_dispatch_each_action_and_skip_release_and_recording')
     Desktop = @('settings_window_is_created_and_reused_by_the_window_controller', 'settings_minimize_and_arrange_focus_loss_request_window_close', 'tray_input_opens_settings_and_routes_restart_and_quit', 'display_change_message_notifies_the_application_without_changing_monitors')
     Platform = @('startup_registration_and_removal_read_back_an_isolated_scheduler', 'path_registration_round_trips_in_a_separate_registry_key', 'elevation_request_uses_runas_and_recognizes_failure_without_elevating')
