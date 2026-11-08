@@ -167,7 +167,7 @@ export function SettingsPanel({
                             />
                             <ToggleOption
                                 label="隣接ウィンドウを吸着して一緒に移動"
-                                tooltip="開始時と同じモニターにある隣接ウィンドウを吸着し、ドラッグしたウィンドウを含め最大4枚を一緒に動かします。"
+                                tooltip="ドラッグ開始時に隣接するウィンドウを最大8枚までまとめ、並びを保って移動します。グループのタイトルバーをクリックすると全体が前面に出ます。"
                                 checked={config.alt_drag_follow_neighbors}
                                 disabled={!config.alt_drag_enabled && !config.middle_drag_enabled}
                                 onChange={(v) => updateConfig({ alt_drag_follow_neighbors: v })}

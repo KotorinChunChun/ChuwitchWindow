@@ -20,15 +20,18 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetAncestor, GetMessageW, GetShellWindow, GetWindowRect, GetWindowTextLengthW,
-    GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed, SetWindowPos, SetWindowsHookExW,
-    UnhookWindowsHookEx, WindowFromPoint, GA_ROOT, HHOOK, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT,
-    SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, WH_MOUSE_LL, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE,
+    GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed, SendMessageTimeoutW,
+    SetWindowPos, SetWindowsHookExW, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT, HHOOK,
+    HTCAPTION, HWND_TOP, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, SMTO_ABORTIFHUNG, SMTO_ERRORONEXIT,
+    SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
+    WH_MOUSE_LL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE,
+    WM_NCHITTEST,
 };
 
 const SNAP_DISTANCE: i32 = 12;
 const DRAG_DISTANCE: i32 = 4;
-const MAX_GROUP_WINDOWS: usize = 4;
+const MAX_GROUP_WINDOWS: usize = 8;
+const FOLLOW_NEIGHBORS: u8 = 4;
 static ENABLED: AtomicU8 = AtomicU8::new(0);
 static OPTIONS: Mutex<Option<(bool, RuleNode)>> = Mutex::new(None);
 
@@ -61,14 +64,31 @@ impl DragButton {
 
 struct Gesture {
     button: DragButton,
-    target: isize,
+    target: WindowKey,
     origin: POINT,
     latest: Mutex<(POINT, bool)>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WindowKey {
+    hwnd: isize,
+    pid: u32,
+}
+
+impl WindowKey {
+    fn is_current(self) -> bool {
+        self.pid != 0 && window_pid(HWND(self.hwnd)) == self.pid
+    }
+}
+
+enum Work {
+    Drag(Arc<Gesture>),
+    TitleClick { target: WindowKey, point: POINT },
+}
+
 thread_local! {
     static CAPTURE: RefCell<Option<Arc<Gesture>>> = const { RefCell::new(None) };
-    static START: RefCell<Option<SyncSender<Arc<Gesture>>>> = const { RefCell::new(None) };
+    static WORKER: RefCell<Option<SyncSender<Work>>> = const { RefCell::new(None) };
 }
 
 pub fn configure(config: &AppConfig) {
@@ -83,21 +103,36 @@ pub fn configure(config: &AppConfig) {
     if config.middle_drag_enabled {
         enabled |= DragButton::Middle as u8;
     }
+    if config.alt_drag_follow_neighbors && enabled != 0 {
+        enabled |= FOLLOW_NEIGHBORS;
+    }
     ENABLED.store(enabled, Ordering::Release);
 }
 
 pub fn init(config: &AppConfig) {
     configure(config);
-    let (send, receive) = mpsc::sync_channel::<Arc<Gesture>>(1);
+    let (send, receive) = mpsc::sync_channel::<Work>(1);
     thread::spawn(move || {
         // フックとは別のスレッドで、列挙・吸着判定・移動を行う。
         unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
-        while let Ok(gesture) = receive.recv() {
-            run_gesture(&gesture);
+        let mut groups = Vec::new();
+        while let Ok(work) = receive.recv() {
+            groups.retain_mut(|group: &mut Vec<WindowKey>| {
+                group.retain(|key| key.is_current());
+                group.len() > 1
+            });
+            match work {
+                Work::Drag(gesture) => run_gesture(&gesture, &mut groups),
+                Work::TitleClick { target, point } => {
+                    if ENABLED.load(Ordering::Acquire) & FOLLOW_NEIGHBORS != 0 {
+                        raise_group(&groups, target, point);
+                    }
+                }
+            }
         }
     });
     thread::spawn(move || unsafe {
-        START.with(|slot| slot.replace(Some(send)));
+        WORKER.with(|slot| slot.replace(Some(send)));
         SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let hook = match install_hook() {
             Ok(hook) => hook,
@@ -149,6 +184,20 @@ fn record_mouse(message: u32, point: POINT) -> bool {
             *capture = None;
         }
         let Some(button) = pressed else { return false };
+        if button == DragButton::AltLeft
+            && ENABLED.load(Ordering::Acquire) & FOLLOW_NEIGHBORS != 0
+            && modifiers_match(DragButton::Middle)
+        {
+            let hwnd = unsafe { GetAncestor(WindowFromPoint(point), GA_ROOT) };
+            let pid = window_pid(hwnd);
+            if pid != 0 && pid != std::process::id() {
+                send_work(Work::TitleClick {
+                    target: WindowKey { hwnd: hwnd.0, pid },
+                    point,
+                });
+            }
+            return false;
+        }
         if !button.enabled(&ENABLED) || !modifiers_match(button) {
             return false;
         }
@@ -164,21 +213,28 @@ fn record_mouse(message: u32, point: POINT) -> bool {
         }
         let gesture = Arc::new(Gesture {
             button,
-            target: hwnd.0,
+            target: WindowKey {
+                hwnd: hwnd.0,
+                pid: window_pid(hwnd),
+            },
             origin: point,
             latest: Mutex::new((point, false)),
         });
-        if START.with(|sender| {
-            sender
-                .borrow()
-                .as_ref()
-                .is_some_and(|send| send.try_send(gesture.clone()).is_ok())
-        }) {
+        if send_work(Work::Drag(gesture.clone())) {
             *capture = Some(gesture);
             true
         } else {
             false
         }
+    })
+}
+
+fn send_work(work: Work) -> bool {
+    WORKER.with(|sender| {
+        sender
+            .borrow()
+            .as_ref()
+            .is_some_and(|send| send.try_send(work).is_ok())
     })
 }
 
@@ -212,6 +268,13 @@ struct DragWindow {
 }
 
 impl DragWindow {
+    fn key(&self) -> WindowKey {
+        WindowKey {
+            hwnd: self.hwnd.0,
+            pid: self.pid,
+        }
+    }
+
     fn new(hwnd: HWND) -> Option<Self> {
         let pid = window_pid(hwnd);
         let mut raw = RECT::default();
@@ -256,49 +319,123 @@ impl DragWindow {
     }
 }
 
-fn run_gesture(gesture: &Gesture) {
+fn run_gesture(gesture: &Gesture, groups: &mut Vec<Vec<WindowKey>>) {
     let Some((follow, rules)) = OPTIONS.lock().unwrap().clone() else {
         return;
     };
-    let target = HWND(gesture.target);
+    if !gesture.target.is_current() {
+        return;
+    }
+    let target = HWND(gesture.target.hwnd);
     let source_monitor = unsafe { MonitorFromWindow(target, MONITOR_DEFAULTTONULL) };
+    let previous = groups
+        .iter()
+        .find(|group| group.contains(&gesture.target))
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     let mut windows = window::get_target_windows()
         .into_iter()
         .filter(|w| !w.is_minimized && !w.is_maximized && !w.is_fullscreen)
         .filter(|w| !pin::is_pinned(w.hwnd) && !is_excluded(w, &rules))
         .filter(|w| {
-            w.hwnd == gesture.target
+            w.hwnd == gesture.target.hwnd
                 || follow
-                    && source_monitor.0 != 0
-                    && unsafe { MonitorFromWindow(HWND(w.hwnd), MONITOR_DEFAULTTONULL) }
-                        == source_monitor
+                    && (previous.iter().any(|key| key.hwnd == w.hwnd)
+                        || source_monitor.0 != 0
+                            && unsafe { MonitorFromWindow(HWND(w.hwnd), MONITOR_DEFAULTTONULL) }
+                                == source_monitor)
         })
         .filter_map(|w| DragWindow::new(HWND(w.hwnd)))
         .collect::<Vec<_>>();
-    let Some(index) = windows.iter().position(|w| w.hwnd == target) else {
+    let Some(index) = windows.iter().position(|w| w.key() == gesture.target) else {
         return;
     };
-    let lead = windows.swap_remove(index);
-    let mut followers = Vec::new();
-    track_gesture(gesture, &ENABLED, |offset, first_move| {
-        if !lead.move_by(offset) {
+    let lead = windows.remove(index);
+    let mut members = if follow {
+        collect_group(lead, windows, previous)
+    } else {
+        vec![lead]
+    };
+    let mut moved = false;
+    track_gesture(gesture, &ENABLED, |offset| {
+        if !members[0].move_by(offset) {
             return false;
         }
-        if first_move {
-            attach(&lead.frame, (0, 0), &mut windows, &mut followers, true);
-        }
-        attach(&lead.frame, offset, &mut windows, &mut followers, false);
-        followers
-            .retain(|(window, anchor)| window.move_by((offset.0 + anchor.0, offset.1 + anchor.1)));
+        members.retain(|window| window.key() == gesture.target || window.move_by(offset));
+        moved = true;
         true
     });
+    if follow && moved {
+        remember_group(groups, members.iter().map(DragWindow::key).collect());
+    }
 }
 
-fn track_gesture(
-    gesture: &Gesture,
-    enabled: &AtomicU8,
-    mut move_to: impl FnMut(Offset, bool) -> bool,
-) {
+fn remember_group(groups: &mut Vec<Vec<WindowKey>>, members: Vec<WindowKey>) {
+    groups.retain_mut(|group| {
+        group.retain(|key| !members.contains(key));
+        group.len() > 1
+    });
+    if members.len() > 1 {
+        groups.push(members);
+    }
+}
+
+fn raise_group(groups: &[Vec<WindowKey>], target: WindowKey, point: POINT) {
+    let Some(group) = groups.iter().find(|group| group.contains(&target)) else {
+        return;
+    };
+    let hwnd = HWND(target.hwnd);
+    // 負座標を含むスクリーン座標を WM_NCHITTEST の符号付き16ビット2成分へ格納する。
+    let (Ok(x), Ok(y)) = (i16::try_from(point.x), i16::try_from(point.y)) else {
+        return;
+    };
+    let packed = (u32::from(y as u16) << 16) | u32::from(x as u16);
+    let mut hit = 0usize;
+    let result = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            WM_NCHITTEST,
+            WPARAM(0),
+            LPARAM(packed as isize),
+            SMTO_ABORTIFHUNG | SMTO_ERRORONEXIT,
+            75,
+            Some(&mut hit),
+        )
+    };
+    if result.0 == 0 || hit != HTCAPTION as usize {
+        return;
+    }
+    // 通常のクリックで選択されたウィンドウのフォーカスを保ち、同じグループだけを上げる。
+    for key in group
+        .iter()
+        .copied()
+        .filter(|key| *key != target)
+        .chain(std::iter::once(target))
+    {
+        let member = HWND(key.hwnd);
+        if key.is_current()
+            && unsafe { IsWindowVisible(member).as_bool() && !IsIconic(member).as_bool() }
+        {
+            let _ = unsafe {
+                SetWindowPos(
+                    member,
+                    HWND_TOP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE
+                        | SWP_NOSIZE
+                        | SWP_NOACTIVATE
+                        | SWP_NOOWNERZORDER
+                        | SWP_ASYNCWINDOWPOS,
+                )
+            };
+        }
+    }
+}
+
+fn track_gesture(gesture: &Gesture, enabled: &AtomicU8, mut move_to: impl FnMut(Offset) -> bool) {
     let mut last = (0, 0);
     let mut dragging = false;
     // フックが押下を消費するため、ボタンの状態はフックで受け取ったイベントで追跡する。
@@ -306,7 +443,7 @@ fn track_gesture(
         let (point, finished) = *gesture.latest.lock().unwrap();
         let offset = (point.x - gesture.origin.x, point.y - gesture.origin.y);
         if offset != last && (dragging || offset.0.abs().max(offset.1.abs()) >= DRAG_DISTANCE) {
-            if !move_to(offset, !dragging) {
+            if !move_to(offset) {
                 return;
             }
             dragging = true;
@@ -319,71 +456,60 @@ fn track_gesture(
     }
 }
 
-fn attach(
-    lead: &MonitorRect,
-    (x, y): Offset,
-    candidates: &mut Vec<DragWindow>,
-    followers: &mut Vec<(DragWindow, Offset)>,
-    initial: bool,
-) {
-    let moved = rect_at(lead, (x, y));
-    while followers.len() < MAX_GROUP_WINDOWS - 1 {
-        // つながった辺も次の吸着先にして、間隔の最も小さい候補を順に加える。
-        let members = std::iter::once((moved.clone(), (0, 0))).chain(followers.iter().map(
-            |(window, anchor)| {
-                if initial {
-                    (window.frame.clone(), *anchor)
-                } else {
-                    (rect_at(&window.frame, (x + anchor.0, y + anchor.1)), (0, 0))
-                }
-            },
-        ));
+fn collect_group(
+    lead: DragWindow,
+    mut candidates: Vec<DragWindow>,
+    previous: &[WindowKey],
+) -> Vec<DragWindow> {
+    let mut members = vec![lead];
+    let mut index = 0;
+    while index < candidates.len() && members.len() < MAX_GROUP_WINDOWS {
+        if previous.contains(&candidates[index].key()) {
+            members.push(candidates.remove(index));
+        } else {
+            index += 1;
+        }
+    }
+    while members.len() < MAX_GROUP_WINDOWS {
         let next = members
-            .flat_map(|(member, shift)| {
+            .iter()
+            .flat_map(|member| {
                 candidates
                     .iter()
                     .enumerate()
                     .filter_map(move |(index, candidate)| {
-                        snap_offset(&member, &candidate.frame)
-                            .map(|(snap_x, snap_y)| (index, (snap_x, snap_y), shift))
+                        adjacent_distance(&member.frame, &candidate.frame)
+                            .or_else(|| adjacent_distance(&member.raw, &candidate.raw))
+                            .map(|distance| (index, distance))
                     })
             })
-            .min_by_key(|(_, (snap_x, snap_y), _)| snap_x.abs() + snap_y.abs());
-        let Some((index, (snap_x, snap_y), (shift_x, shift_y))) = next else {
-            break;
-        };
-        followers.push((
-            candidates.remove(index),
-            (snap_x + shift_x - x, snap_y + shift_y - y),
-        ));
+            .min_by_key(|(_, distance)| *distance);
+        let Some((index, _)) = next else { break };
+        members.push(candidates.remove(index));
     }
+    members
 }
 
-fn rect_at(rect: &MonitorRect, (x, y): Offset) -> MonitorRect {
-    MonitorRect {
-        left: rect.left + x,
-        right: rect.right + x,
-        top: rect.top + y,
-        bottom: rect.bottom + y,
-    }
-}
-
-fn snap_offset(lead: &MonitorRect, other: &MonitorRect) -> Option<Offset> {
-    if lead.top < other.bottom && other.top < lead.bottom {
-        for dx in [lead.right - other.left, lead.left - other.right] {
-            if dx.abs() <= SNAP_DISTANCE {
-                return Some((dx, 0));
-            }
-        }
-    }
-    if lead.left < other.right && other.left < lead.right {
-        for dy in [lead.bottom - other.top, lead.top - other.bottom] {
-            if dy.abs() <= SNAP_DISTANCE {
-                return Some((0, dy));
-            }
-        }
-    }
-    None
+fn adjacent_distance(left: &MonitorRect, right: &MonitorRect) -> Option<i32> {
+    let overlaps = |a_start: i32, a_end: i32, b_start: i32, b_end: i32| {
+        let overlap = a_end.min(b_end) - a_start.max(b_start);
+        overlap > 0 && overlap * 2 >= (a_end - a_start).min(b_end - b_start)
+    };
+    let horizontal = overlaps(left.top, left.bottom, right.top, right.bottom).then(|| {
+        (left.right - right.left)
+            .abs()
+            .min((left.left - right.right).abs())
+    });
+    let vertical = overlaps(left.left, left.right, right.left, right.right).then(|| {
+        (left.bottom - right.top)
+            .abs()
+            .min((left.top - right.bottom).abs())
+    });
+    horizontal
+        .into_iter()
+        .chain(vertical)
+        .min()
+        .filter(|distance| *distance <= SNAP_DISTANCE)
 }
 
 #[cfg(test)]
@@ -420,7 +546,7 @@ mod tests {
     fn assert_drag_moves(button: DragButton, release: u32, other_release: u32) {
         let gesture = Arc::new(Gesture {
             button,
-            target: 0,
+            target: WindowKey { hwnd: 0, pid: 0 },
             origin: POINT { x: 0, y: 0 },
             latest: Mutex::new((POINT { x: 0, y: 0 }, false)),
         });
@@ -429,8 +555,8 @@ mod tests {
 
         let enabled = AtomicU8::new(button as u8);
         let mut moves = Vec::new();
-        track_gesture(&gesture, &enabled, |offset, first_move| {
-            moves.push((offset, first_move));
+        track_gesture(&gesture, &enabled, |offset| {
+            moves.push(offset);
             match moves.len() {
                 1 => {
                     assert!(!record_mouse(other_release, POINT { x: 99, y: 99 }));
@@ -442,77 +568,63 @@ mod tests {
             true
         });
 
-        assert_eq!(
-            moves,
-            [((10, 5), true), ((20, 15), false), ((25, 20), false)]
-        );
+        assert_eq!(moves, [(10, 5), (20, 15), (25, 20)]);
         assert!(!record_mouse(WM_MOUSEMOVE, POINT { x: 30, y: 30 }));
     }
 
     #[test]
-    fn only_nearby_edges_with_overlapping_spans_snap() {
+    fn only_nearby_edges_with_sufficient_overlap_group() {
         let lead = rect(0, 0, 100, 100);
-        assert_eq!(snap_offset(&lead, &rect(112, 20, 190, 120)), Some((-12, 0)));
-        assert_eq!(snap_offset(&lead, &rect(-80, 0, -5, 100)), Some((5, 0)));
-        assert_eq!(snap_offset(&lead, &rect(25, 105, 150, 195)), Some((0, -5)));
-        assert_eq!(snap_offset(&lead, &rect(0, -80, 75, -2)), Some((0, 2)));
-        assert_eq!(snap_offset(&lead, &rect(113, 20, 190, 120)), None);
-        assert_eq!(snap_offset(&lead, &rect(100, 100, 175, 175)), None);
-        assert_eq!(snap_offset(&lead, &rect(0, 0, 100, 100)), None);
+        assert_eq!(adjacent_distance(&lead, &rect(112, 20, 190, 120)), Some(12));
+        assert_eq!(adjacent_distance(&lead, &rect(-80, 0, -5, 100)), Some(5));
+        assert_eq!(adjacent_distance(&lead, &rect(25, 105, 150, 195)), Some(5));
+        assert_eq!(adjacent_distance(&lead, &rect(113, 20, 190, 120)), None);
+        assert_eq!(adjacent_distance(&lead, &rect(100, 90, 175, 175)), None);
+        assert_eq!(adjacent_distance(&lead, &lead), None);
     }
 
-    #[test]
-    fn a_later_attachment_preserves_the_relative_position() {
-        let lead = rect(-300, 0, -200, 100);
-        let frame = rect(-150, 10, -50, 110);
-        let mut candidates = vec![DragWindow {
-            hwnd: HWND::default(),
-            pid: 0,
-            raw: frame.clone(),
+    fn fixture(index: isize, raw: MonitorRect, frame: MonitorRect) -> DragWindow {
+        DragWindow {
+            hwnd: HWND(index),
+            pid: 1,
+            raw,
             frame,
-        }];
-        let mut followers = Vec::new();
-        attach(&lead, (20, 0), &mut candidates, &mut followers, false);
-        assert_eq!(candidates.len(), 1);
-        attach(&lead, (45, 0), &mut candidates, &mut followers, false);
-        assert_eq!(followers[0].1, (-50, 0));
-        attach(&lead, (70, 20), &mut candidates, &mut followers, false);
-        let (window, anchor) = &followers[0];
-        assert_eq!(
-            (
-                window.raw.left + 70 + anchor.0,
-                window.raw.top + 20 + anchor.1
-            ),
-            (-130, 30)
-        );
-        assert!(candidates.is_empty());
+        }
     }
 
     #[test]
-    fn adjacent_chain_moves_up_to_four_windows() {
-        let lead = rect(0, 0, 100, 100);
-        let mut candidates = (1..=4)
+    fn collects_eight_before_moving_and_preserves_original_rectangles() {
+        let lead = fixture(0, rect(0, 0, 100, 100), rect(5, 0, 95, 95));
+        let candidates = (1..=8)
             .rev()
             .map(|index| {
-                let frame = rect(index * 110, 0, index * 110 + 100, 100);
-                DragWindow {
-                    hwnd: HWND(index as isize),
-                    pid: 0,
-                    raw: frame.clone(),
-                    frame,
-                }
+                let x = index * 104;
+                fixture(
+                    index as isize,
+                    rect(x, 0, x + 100, 100),
+                    rect(x + 5, 0, x + 95, 95),
+                )
             })
             .collect();
-        let mut followers = Vec::new();
-        attach(&lead, (0, 0), &mut candidates, &mut followers, true);
-        assert_eq!(
-            followers
-                .iter()
-                .map(|(window, offset)| (window.hwnd.0, *offset))
-                .collect::<Vec<_>>(),
-            [(1, (-10, 0)), (2, (-20, 0)), (3, (-30, 0))]
-        );
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(candidates[0].hwnd.0, 4);
+        let members = collect_group(lead, candidates, &[]);
+        assert_eq!(members.len(), 8);
+        for (index, member) in members.iter().enumerate() {
+            assert_eq!(member.hwnd.0, index as isize);
+            assert_eq!(member.raw.left, index as i32 * 104);
+        }
+    }
+
+    #[test]
+    fn existing_members_keep_their_places_and_can_be_reassigned() {
+        let lead = fixture(1, rect(0, 0, 100, 100), rect(0, 0, 100, 100));
+        let member = fixture(2, rect(200, 0, 300, 100), rect(200, 0, 300, 100));
+        let previous = vec![lead.key(), member.key()];
+        let members = collect_group(lead, vec![member], &previous);
+        assert_eq!(members.len(), 2);
+        assert_eq!(members[1].raw.left, 200);
+        let mut groups = vec![previous.clone()];
+        let other = WindowKey { hwnd: 3, pid: 1 };
+        remember_group(&mut groups, vec![previous[1], other]);
+        assert_eq!(groups, [vec![previous[1], other]]);
     }
 }
