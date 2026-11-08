@@ -11,6 +11,7 @@ pub(super) struct DragLayout {
     pub bounds: MonitorRect,
     pub origin: (i32, i32),
     pub source: Option<MonitorArea>,
+    pub fills_source_work_area: bool,
     pub snap: bool,
     pub resize: bool,
 }
@@ -66,8 +67,17 @@ impl DragLayout {
         let unscaled = placement.rect(&self.bounds);
         // ドラッグ中は元の大きさで追従し、ボタンを離したときだけ拡縮する。
         if let Some(source) = &self.source {
-            if finished && self.resize && source.bounds.size() != destination.bounds.size() {
-                placement.scale = work_area_scale(&source.work, &destination.work);
+            if finished && self.resize && source.bounds != destination.bounds {
+                if self.fills_source_work_area {
+                    // 画面をほぼ覆う配置は、つかんだ位置ではなく作業領域の左上を基準に移す。
+                    placement.origin = (source.work.left, source.work.top);
+                    placement.cursor = (destination.work.left, destination.work.top);
+                    placement.scale = work_area_scale(&source.work, &destination.work);
+                    return placement;
+                }
+                if source.bounds.size() != destination.bounds.size() {
+                    placement.scale = work_area_scale(&source.work, &destination.work);
+                }
             }
         }
         if self.snap {
@@ -149,6 +159,7 @@ mod tests {
             bounds: rect(-1180, 440, -700, 840),
             origin: (-1100, 480),
             source: None,
+            fills_source_work_area: false,
             snap: true,
             resize: true,
         };
@@ -174,6 +185,7 @@ mod tests {
                 bounds: rect(0, 0, 1920, 1080),
                 work: rect(0, 0, 1920, 1000),
             }),
+            fills_source_work_area: false,
             snap: false,
             resize: true,
         };
@@ -204,6 +216,7 @@ mod tests {
                 bounds: rect(0, 0, 1920, 1000),
                 work: rect(0, 0, 1920, 1000),
             }),
+            fills_source_work_area: false,
             snap: true,
             resize: true,
         };
@@ -216,5 +229,45 @@ mod tests {
         assert_eq!(drag.rect(&layout.bounds).right, 0);
         assert_eq!(drop.rect(&layout.bounds).right, 0);
         assert_eq!(drop.rect(&layout.bounds).size(), (200, 150));
+    }
+
+    #[test]
+    fn near_full_layout_maps_both_axes_between_work_areas_on_release() {
+        let layout = DragLayout {
+            bounds: rect(120, 230, 2000, 1200),
+            origin: (170, 245),
+            source: Some(MonitorArea {
+                bounds: rect(100, 200, 2020, 1280),
+                work: rect(100, 220, 2020, 1220),
+            }),
+            fills_source_work_area: true,
+            snap: true,
+            resize: true,
+        };
+        let destination = MonitorArea {
+            bounds: rect(-960, -580, 0, -20),
+            work: rect(-960, -560, 0, -60),
+        };
+        let drop_point = (-480, -280);
+        let preview = layout.placement(drop_point, Some(&destination), false);
+        assert_eq!(preview.rect(&layout.bounds).size(), (1880, 970));
+        let drop = layout.placement(drop_point, Some(&destination), true);
+        assert_eq!(drop.rect(&layout.bounds), rect(-950, -555, -10, -70));
+        assert_eq!(
+            drop.rect(&rect(120, 230, 1060, 1200)),
+            rect(-950, -555, -480, -70)
+        );
+        assert_eq!(
+            drop.rect(&rect(1060, 230, 2000, 1200)),
+            rect(-480, -555, -10, -70)
+        );
+
+        let same_size = MonitorArea {
+            bounds: rect(-1920, 200, 0, 1280),
+            work: rect(-1920, 220, 0, 1220),
+        };
+        let drop = layout.placement((-450, 600), Some(&same_size), true);
+        assert_eq!(drop.rect(&layout.bounds), rect(-1900, 230, -20, 1200));
+        assert!(!drop.resizes());
     }
 }

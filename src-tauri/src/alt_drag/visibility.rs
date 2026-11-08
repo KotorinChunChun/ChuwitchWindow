@@ -140,6 +140,25 @@ fn at_least_half_visible<'a>(
     visible.iter().map(area).sum::<i64>() >= half
 }
 
+pub(super) fn covers_most_of_work_area<'a>(
+    work: &MonitorRect,
+    frames: impl IntoIterator<Item = &'a MonitorRect>,
+) -> bool {
+    let total = area(work);
+    if total == 0 {
+        return false;
+    }
+    let mut uncovered = vec![work.clone()];
+    for frame in frames {
+        uncovered = uncovered
+            .into_iter()
+            .flat_map(|piece| subtract(piece, frame))
+            .collect();
+    }
+    // 重なりを二重計上せず、空きが作業領域の10%以下なら全体配置として扱う。
+    uncovered.iter().map(area).sum::<i64>() <= total / 10
+}
+
 fn area(rect: &MonitorRect) -> i64 {
     let (width, height) = rect.size();
     i64::from(width.max(0)) * i64::from(height.max(0))
@@ -211,6 +230,24 @@ mod tests {
             &window,
             &desktop,
             &[rect(0, 0, 51, 100)]
+        ));
+    }
+
+    #[test]
+    fn work_area_coverage_uses_the_union_of_frames_clipped_to_the_screen() {
+        let work = rect(0, 0, 100, 100);
+        let left = rect(-20, 0, 70, 100);
+        assert!(covers_most_of_work_area(
+            &work,
+            [&left, &rect(60, 0, 90, 100)]
+        ));
+        assert!(!covers_most_of_work_area(
+            &work,
+            [&left, &rect(60, 0, 89, 100)]
+        ));
+        assert!(!covers_most_of_work_area(
+            &work,
+            [&rect(0, 0, 100, 35), &rect(0, 65, 100, 100)]
         ));
     }
 

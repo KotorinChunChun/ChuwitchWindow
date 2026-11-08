@@ -25,13 +25,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, GetAncestor, GetMessageW, GetShellWindow, GetWindowRect, GetWindowTextLengthW,
-    GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed, SendMessageTimeoutW,
-    SetWindowPos, SetWindowsHookExW, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT, HHOOK,
-    HTCAPTION, HWND_TOP, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, SMTO_ABORTIFHUNG, SMTO_BLOCK,
-    SMTO_ERRORONEXIT, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER,
-    SWP_NOSIZE, SWP_NOZORDER, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_MBUTTONUP,
-    WM_MOUSEMOVE, WM_NCHITTEST,
+    CallNextHookEx, GetAncestor, GetMessageW, GetShellWindow, GetWindowLongW, GetWindowRect,
+    GetWindowTextLengthW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed,
+    SendMessageTimeoutW, SetWindowPos, SetWindowsHookExW, UnhookWindowsHookEx, WindowFromPoint,
+    GA_ROOT, GWL_STYLE, HHOOK, HTCAPTION, HWND_TOP, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT,
+    SMTO_ABORTIFHUNG, SMTO_BLOCK, SMTO_ERRORONEXIT, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
+    WM_MBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WS_THICKFRAME,
 };
 
 const SNAP_DISTANCE: i32 = 12;
@@ -284,7 +284,9 @@ impl DragWindow {
         let rect = placement.rect(&self.raw);
         let (width, height) = rect.size();
         let mut flags = SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOACTIVATE;
-        if !placement.resizes() {
+        let style = unsafe { GetWindowLongW(self.hwnd, GWL_STYLE) } as u32;
+        // 最大化ボタンの有無ではなく、Windowsのサイズ変更枠で判定する。
+        if !placement.resizes() || style & WS_THICKFRAME.0 == 0 {
             flags |= SWP_NOSIZE;
         }
         normal_window(self.hwnd)
@@ -367,10 +369,16 @@ fn run_gesture(gesture: &Gesture, groups: &mut Vec<Vec<WindowKey>>) {
         bounds.right = bounds.right.max(member.frame.right);
         bounds.bottom = bounds.bottom.max(member.frame.bottom);
     }
+    let source = monitor_area(source_monitor);
+    let fills_source_work_area = options.resize
+        && source.as_ref().is_some_and(|monitor| {
+            visibility::covers_most_of_work_area(&monitor.work, members.iter().map(|w| &w.frame))
+        });
     let layout = DragLayout {
         bounds,
         origin: (gesture.origin.x, gesture.origin.y),
-        source: monitor_area(source_monitor),
+        source,
+        fills_source_work_area,
         snap: options.snap,
         resize: options.resize,
     };
@@ -542,6 +550,72 @@ fn adjacent_distance(left: &MonitorRect, right: &MonitorRect) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::core::w;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DestroyWindow, ShowWindow, HMENU, SW_SHOWNOACTIVATE,
+        WS_CAPTION, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_OVERLAPPEDWINDOW, WS_SYSMENU,
+    };
+
+    struct TestWindow(HWND);
+
+    impl Drop for TestWindow {
+        fn drop(&mut self) {
+            unsafe { DestroyWindow(self.0).unwrap() };
+        }
+    }
+
+    fn test_window(
+        style: windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE,
+        x: i32,
+        y: i32,
+    ) -> TestWindow {
+        use std::sync::Once;
+        use windows::Win32::UI::WindowsAndMessaging::{RegisterClassW, WNDCLASSW};
+
+        unsafe extern "system" fn window_proc(
+            hwnd: HWND,
+            message: u32,
+            wparam: WPARAM,
+            lparam: LPARAM,
+        ) -> LRESULT {
+            DefWindowProcW(hwnd, message, wparam, lparam)
+        }
+
+        static REGISTER: Once = Once::new();
+        let name = w!("ChuwitchWindowDragTest");
+        let instance = HINSTANCE(unsafe { GetModuleHandleW(None).unwrap() }.0);
+        REGISTER.call_once(|| {
+            assert_ne!(
+                unsafe {
+                    RegisterClassW(&WNDCLASSW {
+                        lpfnWndProc: Some(window_proc),
+                        hInstance: instance,
+                        lpszClassName: name,
+                        ..Default::default()
+                    })
+                },
+                0
+            );
+        });
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+                name,
+                name,
+                style,
+                x,
+                y,
+                400,
+                260,
+                HWND::default(),
+                HMENU::default(),
+                instance,
+                None,
+            )
+        };
+        assert_ne!(hwnd.0, 0);
+        TestWindow(hwnd)
+    }
 
     fn rect(left: i32, top: i32, right: i32, bottom: i32) -> MonitorRect {
         MonitorRect {
@@ -550,6 +624,49 @@ mod tests {
             right,
             bottom,
         }
+    }
+
+    #[test]
+    fn cross_monitor_drop_moves_fixed_window_without_resizing_it() {
+        let origin = (-16000, -16000);
+        let fixed = test_window(WS_CAPTION | WS_SYSMENU, origin.0 + 410, origin.1 + 10);
+        let flexible = test_window(WS_OVERLAPPEDWINDOW, origin.0 + 10, origin.1 + 10);
+        for window in [&fixed, &flexible] {
+            unsafe { ShowWindow(window.0, SW_SHOWNOACTIVATE) };
+        }
+        let fixed_before = DragWindow::new(fixed.0).unwrap();
+        let flexible_before = DragWindow::new(flexible.0).unwrap();
+        let source = rect(origin.0, origin.1, origin.0 + 820, origin.1 + 280);
+        let destination = rect(-14000, -15000, -13344, -14664);
+        let layout = DragLayout {
+            bounds: source.clone(),
+            origin,
+            fills_source_work_area: visibility::covers_most_of_work_area(
+                &source,
+                [&fixed_before.raw, &flexible_before.raw],
+            ),
+            source: Some(MonitorArea {
+                bounds: source.clone(),
+                work: source,
+            }),
+            snap: true,
+            resize: true,
+        };
+        assert!(layout.fills_source_work_area);
+        let placement = layout.placement(
+            (-13500, -14750),
+            Some(&MonitorArea {
+                bounds: destination.clone(),
+                work: destination,
+            }),
+            true,
+        );
+        assert!(fixed_before.apply_placement(&placement));
+        assert!(flexible_before.apply_placement(&placement));
+        let fixed_after = DragWindow::new(fixed.0).unwrap().raw;
+        let flexible_after = DragWindow::new(flexible.0).unwrap().raw;
+        assert_eq!(fixed_after, rect(-13672, -14988, -13272, -14728));
+        assert_eq!(flexible_after, rect(-13992, -14988, -13672, -14676));
     }
 
     #[test]
