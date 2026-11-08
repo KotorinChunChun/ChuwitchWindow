@@ -13,6 +13,8 @@ export type AppConfig = {
   alt_drag_enabled: boolean;
   middle_drag_enabled: boolean;
   alt_drag_follow_neighbors: boolean;
+  drag_snap_to_work_area: boolean;
+  drag_resize_across_monitors: boolean;
   // v0.2 新規
   pin_hotkey: string;
   escape_hotkey: string;

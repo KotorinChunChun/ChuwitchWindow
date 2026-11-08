@@ -557,13 +557,10 @@ fn calculate_target_rect(
         snap
     } else {
         // Fallback to ratio scaling
-        let src_w = src_monitor.work_area.right - src_monitor.work_area.left;
-        let src_h = src_monitor.work_area.bottom - src_monitor.work_area.top;
         let win_w = window_rect.right - window_rect.left;
         let win_h = window_rect.bottom - window_rect.top;
 
-        let ratio_x = (dest_monitor.work_area.right - dest_monitor.work_area.left) as f32 / src_w as f32;
-        let ratio_y = (dest_monitor.work_area.bottom - dest_monitor.work_area.top) as f32 / src_h as f32;
+        let (ratio_x, ratio_y) = crate::monitor::work_area_scale(&src_monitor.work_area, &dest_monitor.work_area);
 
         let rel_x = window_rect.left - src_monitor.work_area.left;
         let rel_y = window_rect.top - src_monitor.work_area.top;

@@ -1,7 +1,10 @@
+mod layout;
+
 use crate::config::AppConfig;
 use crate::monitor::MonitorRect;
 use crate::rule::{is_excluded, parse_rules, RuleNode};
 use crate::{pin, window};
+use layout::{DragLayout, MonitorArea, Placement};
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{self, SyncSender};
@@ -10,7 +13,10 @@ use std::thread;
 use std::time::Duration;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
-use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONULL};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, HMONITOR, MONITORINFO,
+    MONITOR_DEFAULTTONULL,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{
     SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
@@ -33,7 +39,15 @@ const DRAG_DISTANCE: i32 = 4;
 const MAX_GROUP_WINDOWS: usize = 8;
 const FOLLOW_NEIGHBORS: u8 = 4;
 static ENABLED: AtomicU8 = AtomicU8::new(0);
-static OPTIONS: Mutex<Option<(bool, RuleNode)>> = Mutex::new(None);
+static OPTIONS: Mutex<Option<DragOptions>> = Mutex::new(None);
+
+#[derive(Clone)]
+struct DragOptions {
+    follow: bool,
+    snap: bool,
+    resize: bool,
+    rules: RuleNode,
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum DragButton {
@@ -92,10 +106,12 @@ thread_local! {
 }
 
 pub fn configure(config: &AppConfig) {
-    *OPTIONS.lock().unwrap() = Some((
-        config.alt_drag_follow_neighbors,
-        parse_rules(&config.exclusion_rules),
-    ));
+    *OPTIONS.lock().unwrap() = Some(DragOptions {
+        follow: config.alt_drag_follow_neighbors,
+        snap: config.drag_snap_to_work_area,
+        resize: config.drag_resize_across_monitors,
+        rules: parse_rules(&config.exclusion_rules),
+    });
     let mut enabled = 0;
     if config.alt_drag_enabled {
         enabled |= DragButton::AltLeft as u8;
@@ -258,8 +274,6 @@ fn window_pid(hwnd: HWND) -> u32 {
     pid
 }
 
-type Offset = (i32, i32);
-
 struct DragWindow {
     hwnd: HWND,
     pid: u32,
@@ -301,26 +315,45 @@ impl DragWindow {
         })
     }
 
-    fn move_by(&self, (x, y): Offset) -> bool {
+    fn apply_placement(&self, placement: &Placement) -> bool {
+        let rect = placement.rect(&self.raw);
+        let (width, height) = rect.size();
+        let mut flags = SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOACTIVATE;
+        if !placement.resizes() {
+            flags |= SWP_NOSIZE;
+        }
         normal_window(self.hwnd)
             && window_pid(self.hwnd) == self.pid
             && unsafe {
                 SetWindowPos(
                     self.hwnd,
                     HWND::default(),
-                    self.raw.left + x,
-                    self.raw.top + y,
-                    0,
-                    0,
-                    SWP_ASYNCWINDOWPOS | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                    rect.left,
+                    rect.top,
+                    width.max(1),
+                    height.max(1),
+                    flags,
                 )
             }
             .is_ok()
     }
 }
 
+fn monitor_area(monitor: HMONITOR) -> Option<MonitorArea> {
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    unsafe { GetMonitorInfoW(monitor, &mut info) }
+        .as_bool()
+        .then(|| MonitorArea {
+            bounds: info.rcMonitor.into(),
+            work: info.rcWork.into(),
+        })
+}
+
 fn run_gesture(gesture: &Gesture, groups: &mut Vec<Vec<WindowKey>>) {
-    let Some((follow, rules)) = OPTIONS.lock().unwrap().clone() else {
+    let Some(options) = OPTIONS.lock().unwrap().clone() else {
         return;
     };
     if !gesture.target.is_current() {
@@ -336,10 +369,10 @@ fn run_gesture(gesture: &Gesture, groups: &mut Vec<Vec<WindowKey>>) {
     let mut windows = window::get_target_windows()
         .into_iter()
         .filter(|w| !w.is_minimized && !w.is_maximized && !w.is_fullscreen)
-        .filter(|w| !pin::is_pinned(w.hwnd) && !is_excluded(w, &rules))
+        .filter(|w| !pin::is_pinned(w.hwnd) && !is_excluded(w, &options.rules))
         .filter(|w| {
             w.hwnd == gesture.target.hwnd
-                || follow
+                || options.follow
                     && (previous.iter().any(|key| key.hwnd == w.hwnd)
                         || source_monitor.0 != 0
                             && unsafe { MonitorFromWindow(HWND(w.hwnd), MONITOR_DEFAULTTONULL) }
@@ -351,21 +384,38 @@ fn run_gesture(gesture: &Gesture, groups: &mut Vec<Vec<WindowKey>>) {
         return;
     };
     let lead = windows.remove(index);
-    let mut members = if follow {
+    let mut members = if options.follow {
         collect_group(lead, windows, previous)
     } else {
         vec![lead]
     };
+    let mut bounds = members[0].frame.clone();
+    for member in &members[1..] {
+        bounds.left = bounds.left.min(member.frame.left);
+        bounds.top = bounds.top.min(member.frame.top);
+        bounds.right = bounds.right.max(member.frame.right);
+        bounds.bottom = bounds.bottom.max(member.frame.bottom);
+    }
+    let layout = DragLayout {
+        bounds,
+        origin: (gesture.origin.x, gesture.origin.y),
+        source: monitor_area(source_monitor),
+        snap: options.snap,
+        resize: options.resize,
+    };
     let mut moved = false;
-    track_gesture(gesture, &ENABLED, |offset| {
-        if !members[0].move_by(offset) {
+    track_gesture(gesture, &ENABLED, |point, finished| {
+        let destination = monitor_area(unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONULL) });
+        let placement = layout.placement((point.x, point.y), destination.as_ref(), finished);
+        if !members[0].apply_placement(&placement) {
             return false;
         }
-        members.retain(|window| window.key() == gesture.target || window.move_by(offset));
+        members
+            .retain(|window| window.key() == gesture.target || window.apply_placement(&placement));
         moved = true;
         true
     });
-    if follow && moved {
+    if options.follow && moved {
         remember_group(groups, members.iter().map(DragWindow::key).collect());
     }
 }
@@ -435,15 +485,21 @@ fn raise_group(groups: &[Vec<WindowKey>], target: WindowKey, point: POINT) {
     }
 }
 
-fn track_gesture(gesture: &Gesture, enabled: &AtomicU8, mut move_to: impl FnMut(Offset) -> bool) {
+fn track_gesture(
+    gesture: &Gesture,
+    enabled: &AtomicU8,
+    mut move_to: impl FnMut(POINT, bool) -> bool,
+) {
     let mut last = (0, 0);
     let mut dragging = false;
     // フックが押下を消費するため、ボタンの状態はフックで受け取ったイベントで追跡する。
     while gesture.button.enabled(enabled) {
         let (point, finished) = *gesture.latest.lock().unwrap();
         let offset = (point.x - gesture.origin.x, point.y - gesture.origin.y);
-        if offset != last && (dragging || offset.0.abs().max(offset.1.abs()) >= DRAG_DISTANCE) {
-            if !move_to(offset) {
+        if (offset != last || finished && dragging)
+            && (dragging || offset.0.abs().max(offset.1.abs()) >= DRAG_DISTANCE)
+        {
+            if !move_to(point, finished) {
                 return;
             }
             dragging = true;
@@ -533,17 +589,33 @@ mod tests {
                 && !config.middle_drag_enabled
                 && !config.alt_drag_follow_neighbors
         );
+        assert!(config.drag_snap_to_work_area && config.drag_resize_across_monitors);
         let hook = install_hook().expect("Windowsのマウスフックを登録");
         unsafe { UnhookWindowsHookEx(hook) }.expect("試験フックを解除");
     }
 
     #[test]
     fn captured_drag_processes_multiple_moves_and_the_release_position() {
-        assert_drag_moves(DragButton::AltLeft, WM_LBUTTONUP, WM_MBUTTONUP);
-        assert_drag_moves(DragButton::Middle, WM_MBUTTONUP, WM_LBUTTONUP);
+        assert_drag_moves(
+            DragButton::AltLeft,
+            WM_LBUTTONUP,
+            WM_MBUTTONUP,
+            POINT { x: 25, y: 20 },
+        );
+        assert_drag_moves(
+            DragButton::Middle,
+            WM_MBUTTONUP,
+            WM_LBUTTONUP,
+            POINT { x: 20, y: 15 },
+        );
     }
 
-    fn assert_drag_moves(button: DragButton, release: u32, other_release: u32) {
+    fn assert_drag_moves(
+        button: DragButton,
+        release: u32,
+        other_release: u32,
+        release_point: POINT,
+    ) {
         let gesture = Arc::new(Gesture {
             button,
             target: WindowKey { hwnd: 0, pid: 0 },
@@ -555,20 +627,27 @@ mod tests {
 
         let enabled = AtomicU8::new(button as u8);
         let mut moves = Vec::new();
-        track_gesture(&gesture, &enabled, |offset| {
-            moves.push(offset);
+        track_gesture(&gesture, &enabled, |point, finished| {
+            moves.push((point.x, point.y, finished));
             match moves.len() {
                 1 => {
                     assert!(!record_mouse(other_release, POINT { x: 99, y: 99 }));
                     assert!(!record_mouse(WM_MOUSEMOVE, POINT { x: 20, y: 15 }));
                 }
-                2 => assert!(record_mouse(release, POINT { x: 25, y: 20 })),
+                2 => assert!(record_mouse(release, release_point)),
                 _ => {}
             }
             true
         });
 
-        assert_eq!(moves, [(10, 5), (20, 15), (25, 20)]);
+        assert_eq!(
+            moves,
+            [
+                (10, 5, false),
+                (20, 15, false),
+                (release_point.x, release_point.y, true)
+            ]
+        );
         assert!(!record_mouse(WM_MOUSEMOVE, POINT { x: 30, y: 30 }));
     }
 

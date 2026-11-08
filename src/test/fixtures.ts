@@ -31,6 +31,8 @@ export function createConfig(partial?: Partial<AppConfig>): AppConfig {
     alt_drag_enabled: false,
     middle_drag_enabled: false,
     alt_drag_follow_neighbors: false,
+    drag_snap_to_work_area: true,
+    drag_resize_across_monitors: true,
     pin_hotkey: "Win+Ctrl+Alt+P",
     escape_hotkey: "Win+Ctrl+Alt+E",
     gather_hotkey: "Win+Ctrl+Alt+G",

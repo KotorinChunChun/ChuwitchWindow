@@ -14,6 +14,21 @@ pub struct MonitorRect {
     pub bottom: i32,
 }
 
+impl MonitorRect {
+    pub(crate) fn size(&self) -> (i32, i32) {
+        (self.right - self.left, self.bottom - self.top)
+    }
+}
+
+pub(crate) fn work_area_scale(source: &MonitorRect, destination: &MonitorRect) -> (f32, f32) {
+    let (source_width, source_height) = source.size();
+    let (destination_width, destination_height) = destination.size();
+    (
+        destination_width.max(1) as f32 / source_width.max(1) as f32,
+        destination_height.max(1) as f32 / source_height.max(1) as f32,
+    )
+}
+
 impl From<RECT> for MonitorRect {
     fn from(r: RECT) -> Self {
         Self {

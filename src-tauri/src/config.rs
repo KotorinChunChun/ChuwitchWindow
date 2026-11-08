@@ -28,6 +28,8 @@ pub struct AppConfig {
     pub alt_drag_enabled: bool,
     pub middle_drag_enabled: bool,
     pub alt_drag_follow_neighbors: bool,
+    pub drag_snap_to_work_area: bool,
+    pub drag_resize_across_monitors: bool,
 
     // --- v0.2 新規フィールド ---
     /// ピン留めトグルのショートカットキー (SPEC 2-1)
@@ -61,6 +63,8 @@ impl Default for AppConfig {
             alt_drag_enabled: false,
             middle_drag_enabled: false,
             alt_drag_follow_neighbors: false,
+            drag_snap_to_work_area: true,
+            drag_resize_across_monitors: true,
             // v0.2 新規
             pin_hotkey: "Win+Ctrl+Alt+P".to_string(),
             escape_hotkey: "Win+Ctrl+Alt+E".to_string(),

@@ -173,6 +173,20 @@ export function SettingsPanel({
                                 onChange={(v) => updateConfig({ alt_drag_follow_neighbors: v })}
                             />
                             <ToggleOption
+                                label="ドラッグ時に作業領域の端へ吸着"
+                                tooltip="ウィンドウまたはグループの外周が、タスクバーを除く作業領域の端から20物理ピクセル以内に近づくと吸着します。"
+                                checked={config.drag_snap_to_work_area}
+                                disabled={!config.alt_drag_enabled && !config.middle_drag_enabled}
+                                onChange={(v) => updateConfig({ drag_snap_to_work_area: v })}
+                            />
+                            <ToggleOption
+                                label="解像度の異なるモニターでサイズを調整"
+                                tooltip="別の解像度のモニターでドラッグを終えると、移動先の作業領域に合わせてサイズを調整します。"
+                                checked={config.drag_resize_across_monitors}
+                                disabled={!config.alt_drag_enabled && !config.middle_drag_enabled}
+                                onChange={(v) => updateConfig({ drag_resize_across_monitors: v })}
+                            />
+                            <ToggleOption
                                 label="グループ内で入れ替えを行う"
                                 description="ONの場合、増加・減少方向へのシフト時に同じグループのモニタ間のみで入れ替えを行います"
                                 checked={config.swap_within_groups}
