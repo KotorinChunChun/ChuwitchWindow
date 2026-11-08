@@ -1,13 +1,16 @@
+use std::ffi::OsStr;
+use std::os::windows::ffi::OsStrExt;
+use std::os::windows::process::CommandExt;
+use std::path::Path;
+use std::process::{Command, Output};
 use windows::Win32::Foundation::{HANDLE, HWND};
 use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNOACTIVATE;
-use std::ffi::OsString;
-use std::os::windows::ffi::OsStrExt;
-use std::os::windows::process::CommandExt;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+const STARTUP_TASK: &str = "ChuwitchWindow_AutoStart";
 
 #[link(name = "kernel32")]
 extern "system" {
@@ -76,6 +79,7 @@ pub fn is_user_an_admin() -> bool {
                 size,
                 &mut size,
             );
+            let _ = windows::Win32::Foundation::CloseHandle(handle);
             return result.is_ok() && elevation.TokenIsElevated != 0;
         }
     }
@@ -84,44 +88,51 @@ pub fn is_user_an_admin() -> bool {
 
 pub fn restart_as_admin() -> Result<(), Box<dyn std::error::Error>> {
     let exe_path = std::env::current_exe()?;
-    
-    let mut path_wide: Vec<u16> = OsString::from(exe_path).encode_wide().collect();
-    path_wide.push(0);
-
-    let mut verb_wide: Vec<u16> = OsString::from("runas").encode_wide().collect();
-    verb_wide.push(0);
-
-    unsafe {
-        let res = ShellExecuteW(
+    request_elevation(&exe_path, |verb, exe| unsafe {
+        let verb: Vec<u16> = verb.encode_wide().chain(Some(0)).collect();
+        let exe: Vec<u16> = exe.as_os_str().encode_wide().chain(Some(0)).collect();
+        ShellExecuteW(
             HWND::default(),
-            windows::core::PCWSTR::from_raw(verb_wide.as_ptr()),
-            windows::core::PCWSTR::from_raw(path_wide.as_ptr()),
+            windows::core::PCWSTR::from_raw(verb.as_ptr()),
+            windows::core::PCWSTR::from_raw(exe.as_ptr()),
             windows::core::PCWSTR::null(),
             windows::core::PCWSTR::null(),
             windows::Win32::UI::WindowsAndMessaging::SHOW_WINDOW_CMD(SW_SHOWNOACTIVATE.0 as i32),
-        );
-        
-        // ShellExecute returns a value greater than 32 on success.
-        if (res.0 as isize) <= 32 {
-            return Err("Failed to start elevated process".into());
-        }
-    }
-
+        )
+        .0
+    })?;
     std::process::exit(0);
+}
+
+fn request_elevation(
+    exe: &Path,
+    shell: impl FnOnce(&OsStr, &Path) -> isize,
+) -> Result<(), &'static str> {
+    if shell(OsStr::new("runas"), exe) <= 32 {
+        return Err("Failed to start elevated process");
+    }
+    Ok(())
+}
+
+fn run_schtasks(args: &[&str]) -> std::io::Result<Output> {
+    Command::new("schtasks")
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
 }
 
 pub fn sync_admin_startup(enable: bool) -> Result<(), Box<dyn std::error::Error>> {
     let exe_path = std::env::current_exe()?;
-    let path_str = exe_path.to_string_lossy();
-    let task_name = "ChuwitchWindow_AutoStart";
+    sync_startup(&exe_path, enable, run_schtasks)
+}
 
-    // 直接 schtasks コマンドを実行するヘルパー
-    let run_schtasks = |args: &[&str]| -> Result<std::process::Output, std::io::Error> {
-        std::process::Command::new("schtasks")
-            .args(args)
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-    };
+fn sync_startup(
+    exe_path: &Path,
+    enable: bool,
+    mut run_schtasks: impl FnMut(&[&str]) -> std::io::Result<Output>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path_str = exe_path.to_string_lossy();
+    let task_name = STARTUP_TASK;
 
     if enable {
         // 1. 既存のタスクがあれば削除（エラーは無視）
@@ -131,16 +142,7 @@ pub fn sync_admin_startup(enable: bool) -> Result<(), Box<dyn std::error::Error>
         // /TR 引数はスペースなどの対策として二重引用符で囲んで指定する。自動起動時はGUI非表示パラメータを追加。
         let tr_val = format!("\"{}\" --autostart", path_str);
         let output = run_schtasks(&[
-            "/Create",
-            "/F",
-            "/TN",
-            task_name,
-            "/TR",
-            &tr_val,
-            "/SC",
-            "ONLOGON",
-            "/RL",
-            "HIGHEST",
+            "/Create", "/F", "/TN", task_name, "/TR", &tr_val, "/SC", "ONLOGON", "/RL", "HIGHEST",
         ])?;
 
         if !output.status.success() {
@@ -148,8 +150,11 @@ pub fn sync_admin_startup(enable: bool) -> Result<(), Box<dyn std::error::Error>
             let stdout = decode_output_to_string(&output.stdout);
             return Err(format!(
                 "schtasks /Create が失敗しました (exit={}):\nstdout: {}\nstderr: {}",
-                output.status, stdout.trim(), stderr.trim()
-            ).into());
+                output.status,
+                stdout.trim(),
+                stderr.trim()
+            )
+            .into());
         }
     } else {
         let output = run_schtasks(&["/Delete", "/F", "/TN", task_name])?;
@@ -157,15 +162,21 @@ pub fn sync_admin_startup(enable: bool) -> Result<(), Box<dyn std::error::Error>
         if !output.status.success() {
             let stderr = decode_output_to_string(&output.stderr);
             // タスクが見つからない場合のエラーを許容
-            if stderr.contains("見つかりません") || stderr.contains("cannot find") || stderr.contains("not found") {
+            if stderr.contains("見つかりません")
+                || stderr.contains("cannot find")
+                || stderr.contains("not found")
+            {
                 return Ok(());
             }
 
             let stdout = decode_output_to_string(&output.stdout);
             return Err(format!(
                 "schtasks /Delete が失敗しました (exit={}):\nstdout: {}\nstderr: {}",
-                output.status, stdout.trim(), stderr.trim()
-            ).into());
+                output.status,
+                stdout.trim(),
+                stderr.trim()
+            )
+            .into());
         }
     }
     Ok(())
@@ -179,146 +190,339 @@ pub struct AutostartStatus {
 }
 
 pub fn check_autostart_registered() -> Result<AutostartStatus, String> {
-    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let path_str = exe_path.to_string_lossy().to_string();
-    let task_name = "ChuwitchWindow_AutoStart";
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    startup_status(&exe, run_schtasks)
+}
 
-    let output = std::process::Command::new("schtasks")
-        .args(&["/Query", "/TN", task_name, "/XML"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
-
-    let default_fail = AutostartStatus {
+fn startup_status(
+    exe: &Path,
+    run: impl FnOnce(&[&str]) -> std::io::Result<Output>,
+) -> Result<AutostartStatus, String> {
+    let mut status = AutostartStatus {
         is_registered: false,
         is_same_path: false,
         registered_path: None,
     };
-
-    match output {
-        Ok(out) => {
-            if !out.status.success() {
-                // Task does not exist or access denied
-                return Ok(default_fail);
-            }
-            // Use PowerShell to get the specific executable path registered
-            let script = format!(
-                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
-                 $task = Get-ScheduledTask -TaskName '{}' -ErrorAction SilentlyContinue; \
-                 if ($task) {{ Write-Output $task.Actions[0].Execute }} else {{ Write-Output 'NONE' }}",
-                task_name
-            );
-            
-            let ps_output = std::process::Command::new("powershell")
-                .args(&["-NoProfile", "-Command", &script])
-                .creation_flags(CREATE_NO_WINDOW)
-                .output()
-                .map_err(|e| e.to_string())?;
-                
-            if ps_output.status.success() {
-                let mut res = String::from_utf8_lossy(&ps_output.stdout).trim().to_string();
-                if res == "NONE" || res.is_empty() {
-                    return Ok(default_fail);
-                }
-                // Executable path might have quotes, remove them
-                res = res.replace("\"", "").replace("'", "");
-                
-                let is_same = res.eq_ignore_ascii_case(&path_str);
-                
-                return Ok(AutostartStatus {
-                    is_registered: true,
-                    is_same_path: is_same,
-                    registered_path: Some(res),
-                });
-            }
-
-            Ok(default_fail)
-        }
-        Err(_) => Ok(default_fail),
+    let Ok(output) = run(&["/Query", "/TN", STARTUP_TASK, "/XML"]) else {
+        return Ok(status);
+    };
+    if !output.status.success() {
+        return Ok(status);
     }
+
+    let bytes = output.stdout.as_slice();
+    let xml = if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(b"<\0") {
+        let units = bytes
+            .strip_prefix(&[0xff, 0xfe])
+            .unwrap_or(bytes)
+            .chunks_exact(2)
+            .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
+            .collect::<Vec<_>>();
+        String::from_utf16_lossy(&units)
+    } else {
+        decode_output_to_string(bytes)
+    };
+    let document = roxmltree::Document::parse(xml.trim_start_matches('\u{feff}').trim())
+        .map_err(|error| format!("スタートアップ設定のXMLを読み取れません: {error}"))?;
+    let command = document
+        .root_element()
+        .children()
+        .find(|node| node.has_tag_name("Actions"))
+        .and_then(|actions| actions.children().find(|node| node.has_tag_name("Exec")))
+        .and_then(|exec| exec.children().find(|node| node.has_tag_name("Command")))
+        .and_then(|command| command.text())
+        .map(|path| path.trim().trim_matches('"'));
+    if let Some(path) = command.filter(|path| !path.is_empty()) {
+        status.is_registered = true;
+        status.is_same_path = path.eq_ignore_ascii_case(&exe.to_string_lossy());
+        status.registered_path = Some(path.to_string());
+    }
+    Ok(status)
+}
+
+#[derive(Clone, Copy)]
+enum PathAction {
+    Register,
+    Query,
+    Unregister,
+}
+
+struct PathStatus {
+    registered: bool,
+    changed: bool,
+}
+
+fn path_command(action: PathAction) -> Result<PathStatus, String> {
+    use winreg::{
+        enums::{HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE},
+        RegKey,
+    };
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let bin = exe
+        .parent()
+        .ok_or("実行ファイルの親ディレクトリが見つかりません")?;
+    let current_user = RegKey::predef(HKEY_CURRENT_USER);
+    let environment = match action {
+        PathAction::Register => current_user
+            .create_subkey("Environment")
+            .map(|(key, _)| key),
+        PathAction::Query => current_user.open_subkey_with_flags("Environment", KEY_READ),
+        PathAction::Unregister => {
+            current_user.open_subkey_with_flags("Environment", KEY_READ | KEY_SET_VALUE)
+        }
+    };
+    let environment = match environment {
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && !matches!(action, PathAction::Register) =>
+        {
+            return Ok(PathStatus {
+                registered: false,
+                changed: false,
+            });
+        }
+        other => other.map_err(|error| error.to_string())?,
+    };
+    let result = update_path(&environment, bin, action).map_err(|error| error.to_string())?;
+    if result.changed {
+        use windows::Win32::Foundation::{LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE,
+        };
+        unsafe {
+            SendMessageTimeoutW(
+                HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                WPARAM(0),
+                LPARAM(windows::core::w!("Environment").as_ptr() as isize),
+                SMTO_ABORTIFHUNG,
+                100,
+                None,
+            );
+        }
+    }
+    Ok(result)
+}
+
+fn update_path(
+    key: &winreg::RegKey,
+    bin: &Path,
+    action: PathAction,
+) -> std::io::Result<PathStatus> {
+    use winreg::enums::{REG_EXPAND_SZ, REG_SZ};
+    use winreg::types::{FromRegValue, ToRegValue};
+    let existing = match key.get_raw_value("Path") {
+        Ok(value) if matches!(value.vtype, REG_SZ | REG_EXPAND_SZ) => Some(value),
+        Ok(_) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "PATHのレジストリ値が文字列ではありません",
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    let path = existing
+        .as_ref()
+        .map(String::from_reg_value)
+        .transpose()?
+        .unwrap_or_default();
+    let directory = bin.to_string_lossy();
+    let folded = directory.to_lowercase();
+    let matches = |entry: &str| entry.to_lowercase() == folded;
+    let registered = path.split(';').any(matches);
+    let updated = match action {
+        PathAction::Register if !registered => Some(if path.is_empty() {
+            directory.into_owned()
+        } else {
+            format!("{path};{directory}")
+        }),
+        PathAction::Unregister if registered => Some(
+            path.split(';')
+                .filter(|entry| !matches(entry))
+                .collect::<Vec<_>>()
+                .join(";"),
+        ),
+        _ => None,
+    };
+    if let Some(updated) = updated {
+        let mut value = updated.to_reg_value();
+        if let Some(existing) = existing {
+            value.vtype = existing.vtype;
+        }
+        key.set_raw_value("Path", &value)?;
+        let verified: String = key.get_value("Path")?;
+        return Ok(PathStatus {
+            registered: verified.split(';').any(matches),
+            changed: true,
+        });
+    }
+    Ok(PathStatus {
+        registered,
+        changed: false,
+    })
 }
 
 pub fn register_to_path() -> Result<(), String> {
-    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let bin_dir = exe_path.parent().ok_or("Failed to get parent directory")?;
-    let bin_dir_str = bin_dir.to_string_lossy();
-
-    let script = format!(
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
-         $currentPath = [Environment]::GetEnvironmentVariable('Path', 'User'); \
-         if ($currentPath -split ';' -notcontains '{}') {{ \
-             $newPath = $currentPath + ';' + '{}'; \
-             [Environment]::SetEnvironmentVariable('Path', $newPath, 'User'); \
-             Write-Host 'Success'; \
-         }} else {{ \
-             Write-Host 'AlreadyExists'; \
-         }}",
-        bin_dir_str, bin_dir_str
-    );
-
-    let output = std::process::Command::new("powershell")
-        .args(&["-NoProfile", "-Command", &script])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
-    }
+    let status = path_command(PathAction::Register)?;
+    status
+        .registered
+        .then_some(())
+        .ok_or_else(|| "PATHへの追加を確認できません".to_string())
 }
 
 pub fn check_path_registered() -> Result<bool, String> {
-    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let bin_dir = exe_path.parent().ok_or("Failed to get parent directory")?;
-    let bin_dir_str = bin_dir.to_string_lossy();
-    
-    let script = format!(
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
-         $currentPath = [Environment]::GetEnvironmentVariable('Path', 'User'); \
-         if ($currentPath -split ';' -contains '{}') {{ Write-Host 'true' }} else {{ Write-Host 'false' }}",
-        bin_dir_str
-    );
-
-    let output = std::process::Command::new("powershell")
-        .args(&["-NoProfile", "-Command", &script])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if output.status.success() {
-        let res = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(res == "true")
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
-    }
+    path_command(PathAction::Query).map(|status| status.registered)
 }
 
 pub fn unregister_from_path() -> Result<(), String> {
-    let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let bin_dir = exe_path.parent().ok_or("Failed to get parent directory")?;
-    let bin_dir_str = bin_dir.to_string_lossy();
-    
-    let script = format!(
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
-         $currentPath = [Environment]::GetEnvironmentVariable('Path', 'User'); \
-         $parts = $currentPath -split ';'; \
-         $newParts = $parts | Where-Object {{ $_ -ne '{}' }}; \
-         $newPath = $newParts -join ';'; \
-         [Environment]::SetEnvironmentVariable('Path', $newPath, 'User'); \
-         Write-Host 'Success'",
-        bin_dir_str
-    );
+    let status = path_command(PathAction::Unregister)?;
+    (!status.registered)
+        .then_some(())
+        .ok_or_else(|| "PATHからの解除を確認できません".to_string())
+}
 
-    let output = std::process::Command::new("powershell")
-        .args(&["-NoProfile", "-Command", &script])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| e.to_string())?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::windows::process::ExitStatusExt;
 
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    fn output(code: u32, stdout: Vec<u8>, stderr: &[u8]) -> Output {
+        Output {
+            status: std::process::ExitStatus::from_raw(code),
+            stdout,
+            stderr: stderr.to_vec(),
+        }
+    }
+
+    #[test]
+    fn startup_registration_and_removal_read_back_an_isolated_scheduler() {
+        let exe = Path::new(r"C:\検証 fixture\chuwitchwindow.exe");
+        let mut scheduled = None::<String>;
+        let mut scheduler = |args: &[&str]| {
+            assert!(args.windows(2).any(|pair| pair == ["/TN", STARTUP_TASK]));
+            Ok(match args[0] {
+                "/Create" => {
+                    assert_eq!(&args[6..], &["/SC", "ONLOGON", "/RL", "HIGHEST"]);
+                    let command = args[5]
+                        .strip_prefix('"')
+                        .unwrap()
+                        .strip_suffix("\" --autostart")
+                        .unwrap();
+                    scheduled = Some(command.to_string());
+                    output(0, vec![], b"")
+                }
+                "/Delete" => {
+                    if scheduled.take().is_some() {
+                        output(0, vec![], b"")
+                    } else {
+                        output(1, vec![], b"not found")
+                    }
+                }
+                "/Query" => {
+                    if let Some(command) = &scheduled {
+                        let xml = format!(
+                            r#"<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Actions><Exec><Command>&quot;{command}&quot;</Command><Arguments>--autostart</Arguments></Exec></Actions></Task>"#
+                        );
+                        let bytes = [0xfeff]
+                            .into_iter()
+                            .chain(xml.encode_utf16())
+                            .flat_map(u16::to_le_bytes)
+                            .collect();
+                        output(0, bytes, b"")
+                    } else {
+                        output(1, vec![], b"not found")
+                    }
+                }
+                other => panic!("不明なタスク操作 {other}"),
+            })
+        };
+        assert!(!startup_status(exe, &mut scheduler).unwrap().is_registered);
+        sync_startup(exe, true, &mut scheduler).unwrap();
+        let status = startup_status(exe, &mut scheduler).unwrap();
+        assert!(status.is_registered && status.is_same_path);
+        assert_eq!(status.registered_path.as_deref(), exe.to_str());
+        let conflict = startup_status(Path::new(r"C:\別配置.exe"), &mut scheduler).unwrap();
+        assert!(conflict.is_registered && !conflict.is_same_path);
+        sync_startup(exe, false, &mut scheduler).unwrap();
+        assert!(!startup_status(exe, &mut scheduler).unwrap().is_registered);
+        sync_startup(exe, false, &mut scheduler).unwrap();
+        assert!(sync_startup(exe, true, |_| Ok(output(1, vec![], b"access denied"))).is_err());
+    }
+
+    #[test]
+    fn path_registration_round_trips_in_a_separate_registry_key() {
+        use winreg::{
+            enums::{HKEY_CURRENT_USER, REG_EXPAND_SZ},
+            types::ToRegValue,
+            RegKey,
+        };
+        let root = RegKey::predef(HKEY_CURRENT_USER);
+        let name = format!(r"Software\ChuwitchWindow.CliFixture-{}", std::process::id());
+        let (key, disposition) = root.create_subkey(&name).unwrap();
+        assert_eq!(disposition, winreg::enums::REG_CREATED_NEW_KEY);
+        struct Cleanup<'a>(&'a RegKey, &'a str);
+        impl Drop for Cleanup<'_> {
+            fn drop(&mut self) {
+                let _ = self.0.delete_subkey(self.1);
+            }
+        }
+        let cleanup = Cleanup(&root, &name);
+        let initial = r"%SYSTEMROOT%;C:\Other";
+        let mut seed = initial.to_reg_value();
+        seed.vtype = REG_EXPAND_SZ;
+        key.set_raw_value("Path", &seed).unwrap();
+        let bin = Path::new(r"C:\検証 ' fixture");
+        assert!(
+            !update_path(&key, bin, PathAction::Query)
+                .unwrap()
+                .registered
+        );
+        let added = update_path(&key, bin, PathAction::Register).unwrap();
+        assert!(added.registered && added.changed);
+        assert!(
+            !update_path(&key, bin, PathAction::Register)
+                .unwrap()
+                .changed
+        );
+        assert!(
+            update_path(&key, bin, PathAction::Query)
+                .unwrap()
+                .registered
+        );
+        let value: String = key.get_value("Path").unwrap();
+        assert_eq!(value, format!("{initial};{}", bin.display()));
+        assert_eq!(key.get_raw_value("Path").unwrap().vtype, REG_EXPAND_SZ);
+        let removed = update_path(&key, bin, PathAction::Unregister).unwrap();
+        assert!(!removed.registered && removed.changed);
+        assert_eq!(key.get_raw_value("Path").unwrap(), seed);
+        key.set_value("Path", &7u32).unwrap();
+        assert_eq!(
+            update_path(&key, bin, PathAction::Register)
+                .err()
+                .unwrap()
+                .kind(),
+            std::io::ErrorKind::InvalidData,
+        );
+        assert_eq!(key.get_value::<u32, _>("Path").unwrap(), 7);
+        drop(key);
+        drop(cleanup);
+        assert!(root.open_subkey(&name).is_err());
+    }
+
+    #[test]
+    fn elevation_request_uses_runas_and_recognizes_failure_without_elevating() {
+        let exe = Path::new(r"C:\検証 fixture\chuwitchwindow.exe");
+        for (result, accepted) in [(33, true), (32, false), (5, false)] {
+            assert_eq!(
+                request_elevation(exe, |verb, actual| {
+                    assert_eq!(verb, OsStr::new("runas"));
+                    assert_eq!(actual, exe);
+                    result
+                })
+                .is_ok(),
+                accepted
+            );
+        }
     }
 }

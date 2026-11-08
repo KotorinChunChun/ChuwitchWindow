@@ -4,7 +4,8 @@ use windows::core::w;
 use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, HMENU, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, HMENU, WM_MBUTTONDOWN, WM_MBUTTONUP,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 pub fn rect(l: i32, t: i32, r: i32, b: i32) -> MonitorRect {
@@ -125,6 +126,10 @@ pub fn dual_setup() -> Vec<MonitorInfo> {
 
 pub(crate) struct TestWindow(pub HWND);
 
+thread_local! {
+    pub(crate) static MIDDLE_EVENTS: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 impl Drop for TestWindow {
     fn drop(&mut self) {
         unsafe { DestroyWindow(self.0).unwrap() };
@@ -145,6 +150,9 @@ pub(crate) fn test_window(
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
+        if matches!(message, WM_MBUTTONDOWN | WM_MBUTTONUP) {
+            MIDDLE_EVENTS.with_borrow_mut(|events| events.push(message));
+        }
         DefWindowProcW(hwnd, message, wparam, lparam)
     }
 

@@ -39,13 +39,22 @@ KotorinToysに収録された開発版では、ChuwitchWindowのディレクト�
 ```powershell
 ./dev/scripts/test-debug-ChuwitchWindow-all.ps1 -List
 ./dev/scripts/test-debug-ChuwitchWindow-all.ps1 -Feature Drag -LogDirectory $runLog
+./dev/scripts/test-debug-ChuwitchWindow-all.ps1 -Feature Desktop -LogDirectory $runLog
+./dev/scripts/test-debug-ChuwitchWindow-all.ps1 -Feature Platform -LogDirectory $runLog
 ./dev/scripts/test-debug-ChuwitchWindow-all.ps1 -Feature All -LogDirectory $runLog
 ./dev/scripts/test-debug-ChuwitchWindow-all.ps1 -Feature Runtime -RunningProcessId $appProcessId -LogDirectory $runLog
 ```
 
 `Drag` はタイトルバー、グループ選定と前面化、吸着、モニター間のXY補正を検証します。`MonitorMovement` と `Arrange` では、仮想の作業領域を使い、実際の試験窓を動かして座標・サイズ・元に戻す処理を検証します。`Runtime` は `--startup` で起動済みの対象PIDについて、管理窓口の応答と設定画面の非表示を確認します。`All` に `-RunningProcessId` を指定すると、実行中のアプリの検証も追加できます。
 
-結果はJSONで返し、選んだ試験がすべて通過すると終了コードは `0`、失敗または試験が0件なら `1` です。`All` は登録済みの自動試験をすべて実行します。物理入力、実モニターの着脱、通知領域、Windowsへの設定登録など、自動判定の対象外はJSONの `manualChecks` に含まれます。
+結果はJSONで返し、選んだ試験がすべて通過すると終了コードは `0`、失敗・試験0件・必須ケースの欠落があれば `1` です。`All` は登録済みの自動試験をすべて実行し、`missingCases` に未通過の必須ケースを出します。`isolation` は試験の境界を示します。
+
+- `Drag` はタイトルバーの入力を処理する入口から実際の試験窓の移動までを通します。内容領域の中ボタンは捕捉せず、試験窓のメッセージ受信まで確認します。
+- `Hotkeys` は押下・解放のイベントをディスパッチ入口に渡し、全割り当ての実行先と、記録中の入力の扱いを確認します。
+- `Desktop` は専用の隠し窓へ `WM_DISPLAYCHANGE` を送り、通知を読み戻します。トレイと設定画面の制御は試験用の状態、設定画面の操作はフロントエンド試験で確認します。
+- `Platform` は隔離したレジストリキーでPATHの登録・照会・解除を実行します。自動起動と管理者昇格は代替のタスクスケジューラと昇格先に要求を渡し、登録・解除の状態や成功・失敗を確認します。
+
+CLIは物理マウス・キーボード、モニター着脱、通知領域のシェル表示、UACダイアログを代替入力や試験用の実装で扱います。利用者のウィンドウ配置、画面構成、タスク登録、ユーザーPATHを使った実機確認とは区別します。
 
 ## プロジェクト構成
 

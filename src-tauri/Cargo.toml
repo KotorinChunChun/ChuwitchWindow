@@ -20,6 +20,8 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 tracing-appender = "0.2.4"
 directories = "6.0.0"
 global-hotkey = "0.7.0"
+roxmltree = "0.21.1"
+winreg = "0.55.0"
 chrono = "0.4.38"
 tauri-plugin-dialog = "2.0.0"
 windows-sys = { version = "0.61", features = [

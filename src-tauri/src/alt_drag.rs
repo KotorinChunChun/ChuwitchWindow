@@ -160,6 +160,14 @@ unsafe extern "system" fn mouse_hook(code: i32, message: WPARAM, data: LPARAM) -
 }
 
 fn record_mouse(message: u32, point: POINT) -> bool {
+    record_mouse_with(message, point, || start_mouse_action(message, point))
+}
+
+fn record_mouse_with(
+    message: u32,
+    point: POINT,
+    start: impl FnOnce() -> Option<Arc<Gesture>>,
+) -> bool {
     CAPTURE.with(|slot| {
         let mut capture = slot.borrow_mut();
         if let Some(gesture) = capture.as_ref() {
@@ -177,50 +185,53 @@ fn record_mouse(message: u32, point: POINT) -> bool {
             gesture.latest.lock().unwrap().1 = true;
             *capture = None;
         }
-        if !matches!(message, WM_LBUTTONDOWN | WM_MBUTTONDOWN) {
-            return false;
-        }
-        let enabled = ENABLED.load(Ordering::Acquire);
-        if message == WM_LBUTTONDOWN && enabled & FOLLOW_NEIGHBORS != 0 && unmodified() {
-            let hwnd = unsafe { GetAncestor(WindowFromPoint(point), GA_ROOT) };
-            let pid = window_pid(hwnd);
-            if pid != 0 && pid != std::process::id() {
-                send_work(Work::TitleClick {
-                    target: WindowKey { hwnd: hwnd.0, pid },
-                    point,
-                });
-            }
-            return false;
-        }
-        if message != WM_MBUTTONDOWN || enabled & MIDDLE_DRAG == 0 || !unmodified() {
-            return false;
-        }
-        let hwnd = unsafe { WindowFromPoint(point) };
-        let pid = window_pid(hwnd);
-        if hwnd.0 == 0
-            || hwnd != unsafe { GetAncestor(hwnd, GA_ROOT) }
-            || hwnd == unsafe { GetShellWindow() }
-            || !normal_window(hwnd)
-            || pid == 0
-            || pid == std::process::id()
-            || unsafe { GetWindowTextLengthW(hwnd) } == 0
-            || pin::is_pinned(hwnd.0)
-            || !is_title_bar(hwnd, point, TITLE_HIT_TIMEOUT_MS)
-        {
-            return false;
-        }
-        let gesture = Arc::new(Gesture {
-            target: WindowKey { hwnd: hwnd.0, pid },
-            origin: point,
-            latest: Mutex::new((point, false)),
-        });
-        if send_work(Work::Drag(gesture.clone())) {
-            *capture = Some(gesture);
-            true
-        } else {
-            false
-        }
+        *capture = start();
+        capture.is_some()
     })
+}
+
+fn start_mouse_action(message: u32, point: POINT) -> Option<Arc<Gesture>> {
+    if !matches!(message, WM_LBUTTONDOWN | WM_MBUTTONDOWN) {
+        return None;
+    }
+    let enabled = ENABLED.load(Ordering::Acquire);
+    if message == WM_LBUTTONDOWN && enabled & FOLLOW_NEIGHBORS != 0 && unmodified() {
+        let hwnd = unsafe { GetAncestor(WindowFromPoint(point), GA_ROOT) };
+        let pid = window_pid(hwnd);
+        if pid != 0 && pid != std::process::id() {
+            send_work(Work::TitleClick {
+                target: WindowKey { hwnd: hwnd.0, pid },
+                point,
+            });
+        }
+    }
+    if message != WM_MBUTTONDOWN || enabled & MIDDLE_DRAG == 0 || !unmodified() {
+        return None;
+    }
+    let hwnd = unsafe { WindowFromPoint(point) };
+    let pid = window_pid(hwnd);
+    if pid == std::process::id() || hwnd == unsafe { GetShellWindow() } {
+        return None;
+    }
+    let gesture = title_gesture(hwnd, pid, point)?;
+    send_work(Work::Drag(gesture.clone())).then_some(gesture)
+}
+
+fn title_gesture(hwnd: HWND, pid: u32, point: POINT) -> Option<Arc<Gesture>> {
+    if pid == 0
+        || hwnd != unsafe { GetAncestor(hwnd, GA_ROOT) }
+        || !normal_window(hwnd)
+        || unsafe { GetWindowTextLengthW(hwnd) } == 0
+        || pin::is_pinned(hwnd.0)
+        || !is_title_bar(hwnd, point, TITLE_HIT_TIMEOUT_MS)
+    {
+        return None;
+    }
+    Some(Arc::new(Gesture {
+        target: WindowKey { hwnd: hwnd.0, pid },
+        origin: point,
+        latest: Mutex::new((point, false)),
+    }))
 }
 
 fn send_work(work: Work) -> bool {
@@ -351,7 +362,7 @@ fn run_gesture(gesture: &Gesture, groups: &mut Vec<Vec<WindowKey>>) {
         return;
     };
     let lead = windows.remove(index);
-    let mut members = if options.follow {
+    let members = if options.follow {
         let visibility = visibility::Visibility::capture();
         let lead_is_visible = visibility.has_visible_half(lead.hwnd);
         windows.retain(|candidate| {
@@ -362,6 +373,27 @@ fn run_gesture(gesture: &Gesture, groups: &mut Vec<Vec<WindowKey>>) {
     } else {
         vec![lead]
     };
+    let source = monitor_area(source_monitor);
+    move_group(
+        gesture,
+        members,
+        source,
+        &options,
+        groups,
+        &ENABLED,
+        |point| monitor_area(unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONULL) }),
+    );
+}
+
+fn move_group(
+    gesture: &Gesture,
+    mut members: Vec<DragWindow>,
+    source: Option<MonitorArea>,
+    options: &DragOptions,
+    groups: &mut Vec<Vec<WindowKey>>,
+    enabled: &AtomicU8,
+    destination_at: impl Fn(POINT) -> Option<MonitorArea>,
+) {
     let mut bounds = members[0].frame.clone();
     for member in &members[1..] {
         bounds.left = bounds.left.min(member.frame.left);
@@ -369,7 +401,6 @@ fn run_gesture(gesture: &Gesture, groups: &mut Vec<Vec<WindowKey>>) {
         bounds.right = bounds.right.max(member.frame.right);
         bounds.bottom = bounds.bottom.max(member.frame.bottom);
     }
-    let source = monitor_area(source_monitor);
     let fills_source_work_area = options.resize
         && source.as_ref().is_some_and(|monitor| {
             visibility::covers_most_of_work_area(&monitor.work, members.iter().map(|w| &w.frame))
@@ -383,8 +414,8 @@ fn run_gesture(gesture: &Gesture, groups: &mut Vec<Vec<WindowKey>>) {
         resize: options.resize,
     };
     let mut moved = false;
-    track_gesture(gesture, &ENABLED, |point, finished| {
-        let destination = monitor_area(unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONULL) });
+    track_gesture(gesture, enabled, |point, finished| {
+        let destination = destination_at(point);
         let placement = layout.placement((point.x, point.y), destination.as_ref(), finished);
         if !members[0].apply_placement(&placement) {
             return false;
@@ -605,6 +636,88 @@ mod tests {
         let flexible_after = DragWindow::new(flexible.0).unwrap().raw;
         assert_eq!(fixed_after, rect(-13672, -14988, -13272, -14728));
         assert_eq!(flexible_after, rect(-13992, -14988, -13672, -14676));
+    }
+
+    #[test]
+    fn middle_input_from_title_moves_test_group_and_client_click_reaches_window() {
+        use crate::test_support::MIDDLE_EVENTS;
+        use windows::Win32::Graphics::Gdi::ClientToScreen;
+        use windows::Win32::UI::WindowsAndMessaging::SendMessageW;
+
+        let lead = test_window(WS_OVERLAPPEDWINDOW, -16000, -16000);
+        let neighbor = test_window(WS_OVERLAPPEDWINDOW, -15600, -16000);
+        for window in [&lead, &neighbor] {
+            unsafe { ShowWindow(window.0, SW_SHOWNOACTIVATE) };
+        }
+        let mut client_origin = POINT { x: 160, y: 0 };
+        assert!(unsafe { ClientToScreen(lead.0, &mut client_origin) }.as_bool());
+        let content = POINT {
+            x: client_origin.x,
+            y: client_origin.y + 35,
+        };
+        let pid = window_pid(lead.0);
+        for message in [WM_MBUTTONDOWN, WM_MBUTTONUP] {
+            let handled = record_mouse_with(message, content, || {
+                (message == WM_MBUTTONDOWN)
+                    .then(|| title_gesture(lead.0, pid, content))
+                    .flatten()
+            });
+            assert!(!handled);
+            unsafe { SendMessageW(lead.0, message, WPARAM(0), LPARAM(0)) };
+        }
+        assert_eq!(
+            MIDDLE_EVENTS.with_borrow_mut(std::mem::take),
+            [WM_MBUTTONDOWN, WM_MBUTTONUP]
+        );
+
+        let title = POINT {
+            x: client_origin.x,
+            y: client_origin.y - 6,
+        };
+        let gesture = title_gesture(lead.0, pid, title).unwrap();
+        assert!(record_mouse_with(WM_MBUTTONDOWN, title, || Some(
+            gesture.clone()
+        )));
+        let drop = POINT {
+            x: title.x + 80,
+            y: title.y + 50,
+        };
+        assert!(!record_mouse_with(WM_MOUSEMOVE, drop, || unreachable!()));
+        assert!(record_mouse_with(WM_MBUTTONUP, drop, || unreachable!()));
+        assert!(CAPTURE.with_borrow(Option::is_none));
+
+        let members = [lead.0, neighbor.0].map(|hwnd| DragWindow::new(hwnd).unwrap());
+        let keys = members.each_ref().map(DragWindow::key);
+        let before = members.each_ref().map(|window| window.raw.clone());
+        let options = DragOptions {
+            follow: true,
+            snap: false,
+            resize: false,
+            rules: parse_rules("[]"),
+        };
+        let mut groups = Vec::new();
+        move_group(
+            &gesture,
+            Vec::from(members),
+            None,
+            &options,
+            &mut groups,
+            &AtomicU8::new(MIDDLE_DRAG),
+            |_| None,
+        );
+        assert_eq!(groups, [keys]);
+        for (hwnd, before) in [lead.0, neighbor.0].into_iter().zip(before) {
+            let actual = DragWindow::new(hwnd).unwrap().raw;
+            assert_eq!(
+                actual,
+                rect(
+                    before.left + 80,
+                    before.top + 50,
+                    before.right + 80,
+                    before.bottom + 50
+                )
+            );
+        }
     }
 
     #[test]

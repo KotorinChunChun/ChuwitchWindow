@@ -28,26 +28,58 @@ pub fn show_main_window(app: &AppHandle) {
 }
 
 fn open_main_window(app: &AppHandle) -> tauri::Result<()> {
-    let window = match app.get_webview_window("main") {
+    ensure_settings_window(
+        app.get_webview_window("main"),
+        || {
+            tauri::WebviewWindowBuilder::new(
+                app,
+                "main",
+                tauri::WebviewUrl::App("index.html".into()),
+            )
+            .inner_size(800.0, 600.0)
+            .resizable(true)
+            .maximized(true)
+            .visible(false)
+            .build()
+        },
+        |window| {
+            window.set_title(&WindowTitle::create(""))?;
+            present_settings_window(window)
+        },
+    )
+}
+
+fn ensure_settings_window<W, E>(
+    existing: Option<W>,
+    create: impl FnOnce() -> Result<W, E>,
+    present: impl FnOnce(&W) -> Result<(), E>,
+) -> Result<(), E> {
+    let window = match existing {
         Some(window) => window,
-        None => tauri::WebviewWindowBuilder::new(
-            app,
-            "main",
-            tauri::WebviewUrl::App("index.html".into()),
-        )
-        .inner_size(800.0, 600.0)
-        .resizable(true)
-        .maximized(true)
-        .visible(false)
-        .build()?,
+        None => create()?,
     };
-    window.set_title(&WindowTitle::create(""))?;
+    present(&window)
+}
+
+fn present_settings_window(window: &tauri::WebviewWindow) -> tauri::Result<()> {
     window.show()?;
     let _ = window.unminimize();
     let _ = window.set_always_on_top(true);
     let _ = window.set_always_on_top(false);
     let _ = window.set_focus();
     Ok(())
+}
+
+fn should_close_webview(
+    label: &str,
+    event: &tauri::WindowEvent,
+    is_minimized: impl FnOnce() -> bool,
+) -> bool {
+    match event {
+        tauri::WindowEvent::Focused(false) => label == "arrange",
+        tauri::WindowEvent::Resized(_) => label == "main" && is_minimized(),
+        _ => false,
+    }
 }
 
 /// arrange ウィンドウのデフォルトサイズ
@@ -250,32 +282,76 @@ pub fn run() {
             commands::js_debug_log,
         ])
         .on_window_event(|window, event| {
-            match event {
-                tauri::WindowEvent::CloseRequested { .. } => {
-                    // 何もしなければそのままWindowがClose（破棄）される
-                }
-                tauri::WindowEvent::Focused(focused) => {
-                    // フォーカスが外れた場合、ArrangePopupなら破棄してメモリを解放する
-                    if !focused && window.label() == "arrange" {
-                        let _ = window.close();
-                    }
-                }
-                tauri::WindowEvent::Resized(_) => {
-                    if window.label() == "main" {
-                        if window.is_minimized().unwrap_or(false) {
-                            let _ = window.close(); // 最小化時に破棄
-                        }
-                    }
-                }
-                _ => {}
+            if should_close_webview(window.label(), event, || {
+                window.is_minimized().unwrap_or(false)
+            }) {
+                let _ = window.close();
             }
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, event| match event {
-            tauri::RunEvent::ExitRequested { code: None, api, .. } => {
+            tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } => {
                 api.prevent_exit();
             }
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod desktop_tests {
+    use super::*;
+
+    #[test]
+    fn settings_window_is_created_and_reused_by_the_window_controller() {
+        let mut presented = Vec::new();
+        ensure_settings_window(
+            None,
+            || Ok::<_, ()>(1),
+            |id| {
+                presented.push(*id);
+                Ok(())
+            },
+        )
+        .unwrap();
+        ensure_settings_window(
+            Some(1),
+            || unreachable!(),
+            |id| {
+                presented.push(*id);
+                Ok::<_, ()>(())
+            },
+        )
+        .unwrap();
+        assert_eq!(presented, [1, 1]);
+        assert_eq!(
+            ensure_settings_window(None::<u32>, || Err("creation failed"), |_| unreachable!()),
+            Err("creation failed")
+        );
+    }
+
+    #[test]
+    fn settings_minimize_and_arrange_focus_loss_request_window_close() {
+        let resize = tauri::WindowEvent::Resized(tauri::PhysicalSize::new(800, 600));
+        assert!(should_close_webview("main", &resize, || true));
+        assert!(!should_close_webview("main", &resize, || false));
+        assert!(!should_close_webview("arrange", &resize, || unreachable!()));
+        assert!(should_close_webview(
+            "arrange",
+            &tauri::WindowEvent::Focused(false),
+            || unreachable!()
+        ));
+        assert!(!should_close_webview(
+            "main",
+            &tauri::WindowEvent::Focused(false),
+            || unreachable!()
+        ));
+        assert!(!should_close_webview(
+            "arrange",
+            &tauri::WindowEvent::Focused(true),
+            || unreachable!()
+        ));
+    }
 }

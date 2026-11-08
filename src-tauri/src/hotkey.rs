@@ -1,10 +1,14 @@
+use crate::{
+    action::{dispatch_action, Action},
+    config::AppConfig,
+};
 use global_hotkey::{
     hotkey::{Code, HotKey, Modifiers},
     GlobalHotKeyEvent, GlobalHotKeyManager,
 };
-use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter};
+use std::sync::{Mutex, OnceLock};
+use tauri::AppHandle;
 
 static IS_RECORDING: AtomicBool = AtomicBool::new(false);
 
@@ -31,65 +35,13 @@ pub fn init(app: AppHandle) {
 
     std::thread::spawn(move || {
         while let Ok(event) = receiver.recv() {
-            if event.state == global_hotkey::HotKeyState::Pressed {
-                if IS_RECORDING.load(Ordering::SeqCst) {
-                    continue; // 録画中（設定中）はアプリのショートカットを無視
-                }
-                
-                if let Some(app_handle) = APP_HANDLE.get() {
-                    let config = crate::config::load_config();
-                    
-                    let cw_key = parse_hotkey(&config.rotate_cw_hotkey);
-                    let ccw_key = parse_hotkey(&config.rotate_ccw_hotkey);
-                    let undo_key = parse_hotkey(&config.undo_hotkey);
-
-                    if cw_key.is_some() && event.id == cw_key.unwrap().id() {
-                        crate::logic::handle_rotate(app_handle, true);
-                    } else if ccw_key.is_some() && event.id == ccw_key.unwrap().id() {
-                        crate::logic::handle_rotate(app_handle, false);
-                    } else if undo_key.is_some() && event.id == undo_key.unwrap().id() {
-                        crate::logic::handle_undo(app_handle);
-                    } else {
-                        // v0.2: ピン留めキーの判定
-                        let pin_key = parse_hotkey(&config.pin_hotkey);
-                        let escape_key = parse_hotkey(&config.escape_hotkey);
-                        let gather_key = parse_hotkey(&config.gather_hotkey);
-                        
-                        if pin_key.is_some() && event.id == pin_key.unwrap().id() {
-                            crate::pin::toggle_pin();
-                            let _ = app_handle.emit("pin-toggled", ());
-                        } else if escape_key.is_some() && event.id == escape_key.unwrap().id() {
-                            crate::logic::handle_escape(app_handle);
-                        } else if gather_key.is_some() && event.id == gather_key.unwrap().id() {
-                            crate::logic::handle_gather(app_handle);
-                        } else if let Some(arrange_key) = parse_hotkey(&config.arrange_hotkey) {
-                            if event.id == arrange_key.id() {
-                                crate::show_arrange_window(app_handle);
-                            } else {
-                                // Check if it matches target monitors (2~9)
-                                for target_num in 2..=9 {
-                                    let target_hotkey_str = format!("{}+{}", config.swap_target_modifiers, target_num);
-                                    if let Some(target_key) = parse_hotkey(&target_hotkey_str) {
-                                        if event.id == target_key.id() {
-                                            crate::logic::handle_swap_target(app_handle, target_num);
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            // Check if it matches target monitors (2~9)
-                            for target_num in 2..=9 {
-                                let target_hotkey_str = format!("{}+{}", config.swap_target_modifiers, target_num);
-                                if let Some(target_key) = parse_hotkey(&target_hotkey_str) {
-                                    if event.id == target_key.id() {
-                                        crate::logic::handle_swap_target(app_handle, target_num);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
+            if let Some(app_handle) = APP_HANDLE.get() {
+                if let Some(action) = action_for_event(
+                    event,
+                    IS_RECORDING.load(Ordering::SeqCst),
+                    crate::config::load_config,
+                ) {
+                    dispatch_action(app_handle, action);
                 }
             }
         }
@@ -98,33 +50,13 @@ pub fn init(app: AppHandle) {
 
 pub fn reload_hotkeys() {
     let config = crate::config::load_config();
-    let mut keys_to_register = Vec::new();
-
-    if let Some(k) = parse_hotkey(&config.rotate_cw_hotkey) { keys_to_register.push(k); }
-    if let Some(k) = parse_hotkey(&config.rotate_ccw_hotkey) { keys_to_register.push(k); }
-    if let Some(k) = parse_hotkey(&config.undo_hotkey) { keys_to_register.push(k); }
-    // v0.2: ピン留めキーの登録
-    if let Some(k) = parse_hotkey(&config.pin_hotkey) { keys_to_register.push(k); }
-    // v0.2: エスケープとギャザーの登録
-    if let Some(k) = parse_hotkey(&config.escape_hotkey) { keys_to_register.push(k); }
-    if let Some(k) = parse_hotkey(&config.gather_hotkey) { keys_to_register.push(k); }
-    if let Some(k) = parse_hotkey(&config.arrange_hotkey) { keys_to_register.push(k); }
-    
-    // Register 2~9 target modifiers
-    if !config.swap_target_modifiers.is_empty() {
-        for target_num in 2..=9 {
-            let target_hotkey_str = format!("{}+{}", config.swap_target_modifiers, target_num);
-            if let Some(k) = parse_hotkey(&target_hotkey_str) {
-                keys_to_register.push(k);
-            }
-        }
-    }
+    let keys_to_register = bindings(&config).map(|(key, _)| key);
 
     if let (Some(manager_lock), Some(keys_lock)) = (MANAGER.get(), CURRENT_KEYS.get()) {
         let manager_wrapper = manager_lock.lock().unwrap();
         let manager = &manager_wrapper.0;
         let mut current = keys_lock.lock().unwrap();
-        
+
         // Unregister old ones if they exist
         if !current.is_empty() {
             // we have to convert to slice or array for unregister_all, or just loop
@@ -141,6 +73,41 @@ pub fn reload_hotkeys() {
             }
         }
     }
+}
+
+fn bindings(config: &AppConfig) -> impl Iterator<Item = (HotKey, Action)> + '_ {
+    [
+        (&config.rotate_cw_hotkey, Action::Rotate { clockwise: true }),
+        (
+            &config.rotate_ccw_hotkey,
+            Action::Rotate { clockwise: false },
+        ),
+        (&config.undo_hotkey, Action::Undo),
+        (&config.pin_hotkey, Action::PinToggle),
+        (&config.escape_hotkey, Action::Escape),
+        (&config.gather_hotkey, Action::Gather),
+        (&config.arrange_hotkey, Action::Arrange),
+    ]
+    .into_iter()
+    .filter_map(|(chord, action)| Some((parse_hotkey(chord)?, action)))
+    .chain((2..=9).filter_map(|target| {
+        if config.swap_target_modifiers.is_empty() {
+            return None;
+        }
+        let chord = format!("{}+{target}", config.swap_target_modifiers);
+        Some((parse_hotkey(&chord)?, Action::Swap { target }))
+    }))
+}
+
+fn action_for_event(
+    event: GlobalHotKeyEvent,
+    recording: bool,
+    load_config: impl FnOnce() -> AppConfig,
+) -> Option<Action> {
+    if recording || event.state != global_hotkey::HotKeyState::Pressed {
+        return None;
+    }
+    bindings(&load_config()).find_map(|(key, action)| (key.id() == event.id).then_some(action))
 }
 
 fn parse_hotkey(hotkey_str: &str) -> Option<HotKey> {
@@ -225,7 +192,14 @@ fn parse_hotkey(hotkey_str: &str) -> Option<HotKey> {
         _ => return None,
     };
 
-    Some(HotKey::new(if modifiers.is_empty() { None } else { Some(modifiers) }, code))
+    Some(HotKey::new(
+        if modifiers.is_empty() {
+            None
+        } else {
+            Some(modifiers)
+        },
+        code,
+    ))
 }
 
 #[tauri::command]
@@ -267,10 +241,44 @@ mod tests {
         let modifiers = Modifiers::SUPER | Modifiers::CONTROL | Modifiers::ALT;
         let arrow = HotKey::new(Some(modifiers), Code::ArrowRight);
         assert_eq!(parse_hotkey("Win+Ctrl+Alt+Right").unwrap().id(), arrow.id());
-        assert_eq!(parse_hotkey("Meta+Control+Alt+ArrowRight").unwrap().id(), arrow.id());
+        assert_eq!(
+            parse_hotkey("Meta+Control+Alt+ArrowRight").unwrap().id(),
+            arrow.id()
+        );
         let number = HotKey::new(Some(modifiers), Code::Digit2);
-        assert_eq!(parse_hotkey("Win+Ctrl+Alt+Digit2").unwrap().id(), number.id());
+        assert_eq!(
+            parse_hotkey("Win+Ctrl+Alt+Digit2").unwrap().id(),
+            number.id()
+        );
         assert!(parse_hotkey("Win+Ctrl").is_none());
         assert!(check_hotkey_conflict("Win+Ctrl+unknown".into()));
+    }
+
+    #[test]
+    fn isolated_key_events_dispatch_each_action_and_skip_release_and_recording() {
+        use global_hotkey::HotKeyState::{Pressed, Released};
+        let config = AppConfig::default();
+        let load = || config.clone();
+        let mut verified = 0;
+        for (key, expected) in bindings(&config) {
+            let pressed = GlobalHotKeyEvent {
+                id: key.id(),
+                state: Pressed,
+            };
+            let released = GlobalHotKeyEvent {
+                id: key.id(),
+                state: Released,
+            };
+            assert_eq!(action_for_event(pressed, false, load), Some(expected));
+            assert_eq!(action_for_event(released, false, || unreachable!()), None);
+            assert_eq!(action_for_event(pressed, true, || unreachable!()), None);
+            verified += 1;
+        }
+        assert_eq!(verified, 15);
+        let unknown = GlobalHotKeyEvent {
+            id: 0,
+            state: Pressed,
+        };
+        assert_eq!(action_for_event(unknown, false, load), None);
     }
 }
