@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub const CURRENT_RULE_SCHEMA_VERSION: u32 = 1;
 
@@ -203,24 +203,23 @@ pub fn get_config_path() -> Option<PathBuf> {
 }
 
 pub fn load_config() -> AppConfig {
-    if let Some(path) = get_config_path() {
-        if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok((config, migrated)) = parse_config_json(&content) {
-                if migrated {
-                    save_config(&config);
-                }
-                return config;
-            }
-        }
+    get_config_path().as_deref().map(load_config_at).unwrap_or_default()
+}
+
+fn load_config_at(path: &Path) -> AppConfig {
+    let Some((config, migrated)) = fs::read_to_string(path).ok()
+        .and_then(|content| parse_config_json(&content).ok()) else {
+        return AppConfig::default();
+    };
+    if migrated {
+        let _ = save_config_at(path, &config);
     }
-    AppConfig::default()
+    config
 }
 
 pub fn save_config(config: &AppConfig) {
     if let Some(path) = get_config_path() {
-        if let Ok(content) = serde_json::to_string_pretty(config) {
-            let _ = fs::write(path, content);
-        }
+        let _ = save_config_at(&path, config);
     }
 }
 
@@ -230,9 +229,34 @@ pub fn reset_config() {
     }
 }
 
+fn save_config_at(path: &Path, config: &AppConfig) -> std::io::Result<()> {
+    let content = serde_json::to_string_pretty(config).map_err(std::io::Error::other)?;
+    fs::write(path, content)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_round_trip_through_an_isolated_file() {
+        let dir = std::env::temp_dir().join(format!("chuwitch-settings-test-{}", std::process::id()));
+        fs::create_dir(&dir).unwrap();
+        let path = dir.join("config.json");
+        let config = AppConfig {
+            middle_drag_enabled: true,
+            alt_drag_follow_neighbors: true,
+            drag_resize_across_monitors: false,
+            monitor_order: vec!["fixture-monitor".into()],
+            ..AppConfig::default()
+        };
+        save_config_at(&path, &config).unwrap();
+        let reloaded = load_config_at(&path);
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir(&dir).unwrap();
+        assert_eq!(serde_json::to_value(reloaded).unwrap(), serde_json::to_value(config).unwrap());
+        assert!(!load_config_at(&path).middle_drag_enabled);
+    }
 
     // ---------------------------------------------------------
     // デフォルト値のテスト

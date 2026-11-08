@@ -257,3 +257,20 @@ pub fn check_hotkey_conflict(hotkey_str: String) -> bool {
 pub fn set_recording_state(is_recording: bool) {
     IS_RECORDING.store(is_recording, Ordering::SeqCst);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_config_and_keyboard_event_aliases() {
+        let modifiers = Modifiers::SUPER | Modifiers::CONTROL | Modifiers::ALT;
+        let arrow = HotKey::new(Some(modifiers), Code::ArrowRight);
+        assert_eq!(parse_hotkey("Win+Ctrl+Alt+Right").unwrap().id(), arrow.id());
+        assert_eq!(parse_hotkey("Meta+Control+Alt+ArrowRight").unwrap().id(), arrow.id());
+        let number = HotKey::new(Some(modifiers), Code::Digit2);
+        assert_eq!(parse_hotkey("Win+Ctrl+Alt+Digit2").unwrap().id(), number.id());
+        assert!(parse_hotkey("Win+Ctrl").is_none());
+        assert!(check_hotkey_conflict("Win+Ctrl+unknown".into()));
+    }
+}

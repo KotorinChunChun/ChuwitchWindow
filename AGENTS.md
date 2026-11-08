@@ -57,6 +57,7 @@ Tauri の規約上必要な `src-tauri/`、`src-tauri/nsis/`、`src-tauri/capabi
 現存する運用スクリプト:
 
 - `dev/scripts/update-ChuwitchWindow-version.ps1`: バージョン設定と lockfile を更新する補助処理。
+- `dev/scripts/test-debug-ChuwitchWindow-all.ps1`: 機能別の自動試験を実行し、JSONと終了コードで結果を返す。
 - `dev/scripts/publish-release-ChuwitchWindow-all.ps1`: Release ビルド、ZIP / NSIS 配布物生成、GitHub 公開を行う。明示的な公開作業でのみ実行する。
 
 ## 配布と秘密情報

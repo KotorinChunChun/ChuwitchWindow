@@ -88,8 +88,11 @@ Stream Deckなどのマクロパッドや自作スクリプトから、実行時
 # モニター間を巡回シフトする
 ChuwitchWindow --shift-next
 
-# モニター1とモニター2を入れ替える
-ChuwitchWindow --swap 1 2
+# プライマリとモニター2を入れ替える
+ChuwitchWindow --swap=2
+
+# アクティブなモニターのウィンドウを格子状に整列する
+ChuwitchWindow --arrange=grid
 ```
 
 ※ 既にアプリが常駐している場合はコマンドだけを送信して即座に終了し、常駐していない場合は処理を1回だけ実行して即座に終了（ワンショット実行）します。

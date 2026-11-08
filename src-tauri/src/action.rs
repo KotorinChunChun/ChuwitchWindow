@@ -1,3 +1,4 @@
+use crate::arrange::ArrangeType;
 use tauri::{AppHandle, Emitter};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8,6 +9,7 @@ pub enum Action {
     Escape,
     Gather,
     Arrange,
+    ArrangeNow(ArrangeType),
     Swap { target: u32 },
 }
 
@@ -38,6 +40,20 @@ pub fn parse_cli_actions(args: &[String]) -> Result<Vec<Action>, ParseError> {
             "--escape" => actions.push(Action::Escape),
             "--gather" => actions.push(Action::Gather),
             "--arrange" => actions.push(Action::Arrange),
+            other if other.starts_with("--arrange=") => {
+                let kind = match &other[10..] {
+                    "grid" => ArrangeType::Grid,
+                    "vertical" => ArrangeType::Vertical,
+                    "horizontal" => ArrangeType::Horizontal,
+                    "cascade" => ArrangeType::Cascade,
+                    _ => {
+                        return Err(ParseError {
+                            message: "use --arrange=grid|vertical|horizontal|cascade".into(),
+                        })
+                    }
+                };
+                actions.push(Action::ArrangeNow(kind));
+            }
             "--swap" => {
                 return Err(ParseError {
                     message: "use --swap=N (N = 2..9, primary vs that monitor)".into(),
@@ -112,6 +128,7 @@ pub fn dispatch_action(app: &AppHandle, action: Action) {
         Action::Escape => crate::logic::handle_escape(app),
         Action::Gather => crate::logic::handle_gather(app),
         Action::Arrange => crate::show_arrange_window(app),
+        Action::ArrangeNow(kind) => crate::arrange::handle_arrange_on_active_monitor(app, kind),
         Action::Swap { target } => crate::logic::handle_swap_target(app, target),
     }
 }
@@ -193,6 +210,28 @@ mod tests {
     #[test]
     fn rejects_swap_two_positional() {
         assert!(parse_cli_actions(&args(&["--swap", "1", "2"])).is_err());
+    }
+
+    #[test]
+    fn cli_accepts_all_arrange_modes_and_rejects_unknown_modes() {
+        assert_eq!(
+            parse_cli_actions(&args(&[
+                "--arrange",
+                "--arrange=grid",
+                "--arrange=vertical",
+                "--arrange=horizontal",
+                "--arrange=cascade",
+            ]))
+            .unwrap(),
+            vec![
+                Action::Arrange,
+                Action::ArrangeNow(ArrangeType::Grid),
+                Action::ArrangeNow(ArrangeType::Vertical),
+                Action::ArrangeNow(ArrangeType::Horizontal),
+                Action::ArrangeNow(ArrangeType::Cascade),
+            ]
+        );
+        assert!(parse_cli_actions(&args(&["--arrange=other"])).is_err());
     }
 
     #[test]

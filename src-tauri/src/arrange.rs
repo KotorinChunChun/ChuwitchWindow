@@ -20,7 +20,7 @@ pub fn set_target_hmonitor(hmonitor: isize) {
     info!("[arrange] 対象モニターを記憶: hmonitor={}", hmonitor);
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ArrangeType {
     Grid,
     Vertical,
@@ -30,6 +30,15 @@ pub enum ArrangeType {
 
 /// 自動整列を実行する
 pub fn handle_arrange(app: &tauri::AppHandle, arrange_type: ArrangeType) {
+    let stored_hmonitor = *last_target_hmonitor_lock().lock().unwrap();
+    arrange_windows(app, arrange_type, stored_hmonitor);
+}
+
+pub fn handle_arrange_on_active_monitor(app: &tauri::AppHandle, arrange_type: ArrangeType) {
+    arrange_windows(app, arrange_type, None);
+}
+
+fn arrange_windows(app: &tauri::AppHandle, arrange_type: ArrangeType, stored_hmonitor: Option<isize>) {
     info!("Exec [handle_arrange]: type={:?}", arrange_type);
     
     let monitors = crate::monitor::get_all_monitors();
@@ -41,7 +50,6 @@ pub fn handle_arrange(app: &tauri::AppHandle, arrange_type: ArrangeType) {
     // ポップアップ表示時に記憶した hmonitor を優先して使う。
     // 表示後は GetForegroundWindow() が arrange ウィンドウ自身を返してしまうため、
     // その段階で呼ぶと対象モニターの判定が狂う。
-    let stored_hmonitor = *last_target_hmonitor_lock().lock().unwrap();
     let active_idx = if let Some(hmon) = stored_hmonitor {
         let idx = monitors.iter().position(|m| m.hmonitor == hmon).unwrap_or(0);
         info!("[arrange] 記憶済みhmonitor={} → monitors[{}]={} を対象に決定",
@@ -179,11 +187,16 @@ pub fn handle_arrange(app: &tauri::AppHandle, arrange_type: ArrangeType) {
         }
     }
     
-    // 4. 配置計算
-    let new_rects = calculate_layout(&targets, &available_area, arrange_type);
-
-    // 5. 履歴保存と実行
     let history_state = app.state::<HistoryState>();
+    apply_arrangement(&history_state, &targets, &available_area, arrange_type);
+    info!("[arrange] 完了: {} 件を整列 / モニター={} / 使用エリア=({},{})–({},{})",
+        targets.len(), target_monitor.name,
+        available_area.left, available_area.top,
+        available_area.right, available_area.bottom);
+}
+
+fn apply_arrangement(history: &HistoryState, targets: &[WindowInfo], area: &MonitorRect, arrange_type: ArrangeType) {
+    let new_rects = calculate_layout(targets, area, arrange_type);
     let mut actions = Vec::new();
 
     for (i, win) in targets.iter().enumerate() {
@@ -213,11 +226,7 @@ pub fn handle_arrange(app: &tauri::AppHandle, arrange_type: ArrangeType) {
             }
         }
     }
-    history_state.push(actions);
-    info!("[arrange] 完了: {} 件を整列 / モニター={} / 使用エリア=({},{})–({},{})",
-        targets.len(), target_monitor.name,
-        available_area.left, available_area.top,
-        available_area.right, available_area.bottom);
+    history.push(actions);
 }
 
 fn intersect(r1: &MonitorRect, r2: &MonitorRect) -> bool {
@@ -316,6 +325,40 @@ fn calculate_layout(targets: &[WindowInfo], area: &MonitorRect, arrange_type: Ar
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn all_arrange_modes_apply_expected_rectangles_to_test_windows() {
+        use crate::test_support::test_window;
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, WS_OVERLAPPEDWINDOW};
+
+        let first = test_window(WS_OVERLAPPEDWINDOW, -16000, -16000);
+        let second = test_window(WS_OVERLAPPEDWINDOW, -15600, -16000);
+        let read = |hwnd| -> MonitorRect {
+            let mut rect = RECT::default();
+            unsafe { GetWindowRect(hwnd, &mut rect) }.unwrap();
+            rect.into()
+        };
+        let windows = [first.0, second.0].map(|hwnd| {
+            let rect = read(hwnd);
+            let mut window = mock_window(rect.left, rect.top, rect.right, rect.bottom);
+            window.hwnd = hwnd.0;
+            window
+        });
+        let work = rect(-15000, -15000, -14200, -14400);
+        let history = HistoryState::new();
+        let side_by_side = [rect(-15000, -15000, -14600, -14400), rect(-14600, -15000, -14200, -14400)];
+        for (kind, expected) in [
+            (ArrangeType::Grid, side_by_side.clone()),
+            (ArrangeType::Horizontal, side_by_side),
+            (ArrangeType::Vertical, [rect(-15000, -15000, -14200, -14700), rect(-15000, -14700, -14200, -14400)]),
+            (ArrangeType::Cascade, [rect(-15000, -15000, -14440, -14580), rect(-14970, -14970, -14410, -14550)]),
+        ] {
+            apply_arrangement(&history, &windows, &work, kind);
+            assert_eq!([read(first.0), read(second.0)], expected);
+            let moves = history.pop().unwrap();
+            assert_eq!(moves.iter().map(|movement| &movement.new_rect).collect::<Vec<_>>(), expected.iter().collect::<Vec<_>>());
+        }
+    }
     use super::*;
     use crate::monitor::MonitorRect;
     use crate::window::WindowInfo;

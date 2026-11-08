@@ -1,5 +1,11 @@
 use crate::monitor::{MonitorInfo, MonitorRect};
 use crate::window::WindowInfo;
+use windows::core::w;
+use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, DefWindowProcW, DestroyWindow, HMENU, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+};
 
 pub fn rect(l: i32, t: i32, r: i32, b: i32) -> MonitorRect {
     assert!(r > l && b > t, "invalid rect");
@@ -115,4 +121,65 @@ pub fn monitor_1920(name: &str, origin_x: i32) -> MonitorInfo {
 
 pub fn dual_setup() -> Vec<MonitorInfo> {
     vec![monitor_1920("M1", 0), monitor_1920("M2", 1920)]
+}
+
+pub(crate) struct TestWindow(pub HWND);
+
+impl Drop for TestWindow {
+    fn drop(&mut self) {
+        unsafe { DestroyWindow(self.0).unwrap() };
+    }
+}
+
+pub(crate) fn test_window(
+    style: windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE,
+    x: i32,
+    y: i32,
+) -> TestWindow {
+    use std::sync::Once;
+    use windows::Win32::UI::WindowsAndMessaging::{RegisterClassW, WNDCLASSW};
+
+    unsafe extern "system" fn window_proc(
+        hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        DefWindowProcW(hwnd, message, wparam, lparam)
+    }
+
+    static REGISTER: Once = Once::new();
+    let name = w!("ChuwitchWindowDragTest");
+    let instance = HINSTANCE(unsafe { GetModuleHandleW(None).unwrap() }.0);
+    REGISTER.call_once(|| {
+        assert_ne!(
+            unsafe {
+                RegisterClassW(&WNDCLASSW {
+                    lpfnWndProc: Some(window_proc),
+                    hInstance: instance,
+                    lpszClassName: name,
+                    ..Default::default()
+                })
+            },
+            0
+        );
+    });
+    let hwnd = unsafe {
+        CreateWindowExW(
+            WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+            name,
+            name,
+            style,
+            x,
+            y,
+            400,
+            260,
+            HWND::default(),
+            HMENU::default(),
+            instance,
+            None,
+        )
+    };
+    assert_ne!(hwnd.0, 0);
+    TestWindow(hwnd)
 }

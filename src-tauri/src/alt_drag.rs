@@ -550,72 +550,10 @@ fn adjacent_distance(left: &MonitorRect, right: &MonitorRect) -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use windows::core::w;
+    use crate::test_support::test_window;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DestroyWindow, ShowWindow, HMENU, SW_SHOWNOACTIVATE,
-        WS_CAPTION, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_OVERLAPPEDWINDOW, WS_SYSMENU,
+        ShowWindow, SW_SHOWNOACTIVATE, WS_CAPTION, WS_OVERLAPPEDWINDOW, WS_SYSMENU,
     };
-
-    struct TestWindow(HWND);
-
-    impl Drop for TestWindow {
-        fn drop(&mut self) {
-            unsafe { DestroyWindow(self.0).unwrap() };
-        }
-    }
-
-    fn test_window(
-        style: windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE,
-        x: i32,
-        y: i32,
-    ) -> TestWindow {
-        use std::sync::Once;
-        use windows::Win32::UI::WindowsAndMessaging::{RegisterClassW, WNDCLASSW};
-
-        unsafe extern "system" fn window_proc(
-            hwnd: HWND,
-            message: u32,
-            wparam: WPARAM,
-            lparam: LPARAM,
-        ) -> LRESULT {
-            DefWindowProcW(hwnd, message, wparam, lparam)
-        }
-
-        static REGISTER: Once = Once::new();
-        let name = w!("ChuwitchWindowDragTest");
-        let instance = HINSTANCE(unsafe { GetModuleHandleW(None).unwrap() }.0);
-        REGISTER.call_once(|| {
-            assert_ne!(
-                unsafe {
-                    RegisterClassW(&WNDCLASSW {
-                        lpfnWndProc: Some(window_proc),
-                        hInstance: instance,
-                        lpszClassName: name,
-                        ..Default::default()
-                    })
-                },
-                0
-            );
-        });
-        let hwnd = unsafe {
-            CreateWindowExW(
-                WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-                name,
-                name,
-                style,
-                x,
-                y,
-                400,
-                260,
-                HWND::default(),
-                HMENU::default(),
-                instance,
-                None,
-            )
-        };
-        assert_ne!(hwnd.0, 0);
-        TestWindow(hwnd)
-    }
 
     fn rect(left: i32, top: i32, right: i32, bottom: i32) -> MonitorRect {
         MonitorRect {
@@ -667,6 +605,49 @@ mod tests {
         let flexible_after = DragWindow::new(flexible.0).unwrap().raw;
         assert_eq!(fixed_after, rect(-13672, -14988, -13272, -14728));
         assert_eq!(flexible_after, rect(-13992, -14988, -13672, -14676));
+    }
+
+    #[test]
+    fn raises_all_group_members_above_another_window_without_moving_them() {
+        use windows::Win32::UI::WindowsAndMessaging::{GetWindow, GW_HWNDNEXT};
+
+        let first = test_window(WS_OVERLAPPEDWINDOW, -16000, -16000);
+        let second = test_window(WS_OVERLAPPEDWINDOW, -15700, -16000);
+        let cover = test_window(WS_OVERLAPPEDWINDOW, -15900, -16000);
+        for window in [&first, &second, &cover] {
+            unsafe {
+                ShowWindow(window.0, SW_SHOWNOACTIVATE);
+                SetWindowPos(
+                    window.0,
+                    HWND_TOP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                )
+                .unwrap();
+            }
+        }
+        let first_before = DragWindow::new(first.0).unwrap();
+        let second_before = DragWindow::new(second.0).unwrap();
+        let is_above = |upper, lower| {
+            let mut current = unsafe { GetWindow(upper, GW_HWNDNEXT) };
+            while current.0 != 0 && current != lower {
+                current = unsafe { GetWindow(current, GW_HWNDNEXT) };
+            }
+            current == lower
+        };
+        assert!(is_above(cover.0, first.0));
+        assert!(is_above(cover.0, second.0));
+        raise_group(
+            &[vec![first_before.key(), second_before.key()]],
+            first_before.key(),
+        );
+        assert!(is_above(first.0, cover.0));
+        assert!(is_above(second.0, cover.0));
+        assert_eq!(DragWindow::new(first.0).unwrap().raw, first_before.raw);
+        assert_eq!(DragWindow::new(second.0).unwrap().raw, second_before.raw);
     }
 
     #[test]

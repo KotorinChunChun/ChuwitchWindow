@@ -32,6 +32,21 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 フロントは Vitest + jsdom（`src/**/*.test.ts(x)`）。Rust は `#[cfg(test)]` の単体テスト。タイトルバーの判定は非表示の試験ウィンドウで確認する。
 
+### CLIからの自動判定
+
+KotorinToysに収録された開発版では、ChuwitchWindowのディレクトリから `pwsh` で次のように実行できます。`$runLog` には対象版の `dev/history/vX.Y.Z/logs/<実行識別子>/` を指定します。
+
+```powershell
+./dev/scripts/test-debug-ChuwitchWindow-all.ps1 -List
+./dev/scripts/test-debug-ChuwitchWindow-all.ps1 -Feature Drag -LogDirectory $runLog
+./dev/scripts/test-debug-ChuwitchWindow-all.ps1 -Feature All -LogDirectory $runLog
+./dev/scripts/test-debug-ChuwitchWindow-all.ps1 -Feature Runtime -RunningProcessId $appProcessId -LogDirectory $runLog
+```
+
+`Drag` はタイトルバー、グループ選定と前面化、吸着、モニター間のXY補正を検証します。`MonitorMovement` と `Arrange` では、仮想の作業領域を使い、実際の試験窓を動かして座標・サイズ・元に戻す処理を検証します。`Runtime` は `--startup` で起動済みの対象PIDについて、管理窓口の応答と設定画面の非表示を確認します。`All` に `-RunningProcessId` を指定すると、実行中のアプリの検証も追加できます。
+
+結果はJSONで返し、選んだ試験がすべて通過すると終了コードは `0`、失敗または試験が0件なら `1` です。`All` は登録済みの自動試験をすべて実行します。物理入力、実モニターの着脱、通知領域、Windowsへの設定登録など、自動判定の対象外はJSONの `manualChecks` に含まれます。
+
 ## プロジェクト構成
 
 ```

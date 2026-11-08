@@ -22,10 +22,12 @@ fn pinned_set() -> &'static Mutex<HashSet<isize>> {
 /// - すでにピン留め済みならピン留めを解除する
 pub fn toggle_pin() {
     let hwnd = unsafe { GetForegroundWindow() };
-    if hwnd.0 == 0 {
-        return; // フォアグラウンドウィンドウが取得できない場合は何もしない
+    if hwnd.0 != 0 {
+        toggle_window_pin(hwnd.0);
     }
-    let hwnd_val = hwnd.0 as isize;
+}
+
+fn toggle_window_pin(hwnd_val: isize) {
     let mut set = pinned_set().lock().unwrap();
     if set.contains(&hwnd_val) {
         set.remove(&hwnd_val);
@@ -61,21 +63,17 @@ mod tests {
 
     #[test]
     fn test_pin_toggle_and_check() {
-        // 直接 HWND を指定してテスト（toggle_pin は GetForegroundWindow 依存のため直接テストしない）
         let test_hwnd: isize = 12345;
 
         // 初期状態: ピン留めされていない
         assert!(!is_pinned(test_hwnd));
 
         // ピン留め追加
-        {
-            let mut set = pinned_set().lock().unwrap();
-            set.insert(test_hwnd);
-        }
+        toggle_window_pin(test_hwnd);
         assert!(is_pinned(test_hwnd));
 
         // ピン留め解除
-        remove_pin(test_hwnd);
+        toggle_window_pin(test_hwnd);
         assert!(!is_pinned(test_hwnd));
     }
 
