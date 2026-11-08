@@ -28,13 +28,15 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetAncestor, GetMessageW, GetShellWindow, GetWindowRect, GetWindowTextLengthW,
     GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed, SendMessageTimeoutW,
     SetWindowPos, SetWindowsHookExW, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT, HHOOK,
-    HTCAPTION, HWND_TOP, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, SMTO_ABORTIFHUNG, SMTO_ERRORONEXIT,
-    SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
-    WH_MOUSE_LL, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST,
+    HTCAPTION, HWND_TOP, LLMHF_INJECTED, MSG, MSLLHOOKSTRUCT, SMTO_ABORTIFHUNG, SMTO_BLOCK,
+    SMTO_ERRORONEXIT, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER,
+    SWP_NOSIZE, SWP_NOZORDER, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_MBUTTONUP,
+    WM_MOUSEMOVE, WM_NCHITTEST,
 };
 
 const SNAP_DISTANCE: i32 = 12;
 const DRAG_DISTANCE: i32 = 4;
+const TITLE_HIT_TIMEOUT_MS: u32 = 16;
 const MAX_GROUP_WINDOWS: usize = 8;
 const MIDDLE_DRAG: u8 = 1;
 const FOLLOW_NEIGHBORS: u8 = 2;
@@ -109,13 +111,16 @@ pub fn init(config: &AppConfig) {
             match work {
                 Work::Drag(gesture) => {
                     if ENABLED.load(Ordering::Acquire) & FOLLOW_NEIGHBORS != 0 {
-                        raise_group(&groups, gesture.target, gesture.origin);
+                        raise_group(&groups, gesture.target);
                     }
                     run_gesture(&gesture, &mut groups);
                 }
                 Work::TitleClick { target, point } => {
-                    if ENABLED.load(Ordering::Acquire) & FOLLOW_NEIGHBORS != 0 {
-                        raise_group(&groups, target, point);
+                    if ENABLED.load(Ordering::Acquire) & FOLLOW_NEIGHBORS != 0
+                        && groups.iter().any(|group| group.contains(&target))
+                        && is_title_bar(HWND(target.hwnd), point, 75)
+                    {
+                        raise_group(&groups, target);
                     }
                 }
             }
@@ -190,21 +195,22 @@ fn record_mouse(message: u32, point: POINT) -> bool {
         if message != WM_MBUTTONDOWN || enabled & MIDDLE_DRAG == 0 || !unmodified() {
             return false;
         }
-        let hwnd = unsafe { GetAncestor(WindowFromPoint(point), GA_ROOT) };
+        let hwnd = unsafe { WindowFromPoint(point) };
+        let pid = window_pid(hwnd);
         if hwnd.0 == 0
+            || hwnd != unsafe { GetAncestor(hwnd, GA_ROOT) }
             || hwnd == unsafe { GetShellWindow() }
             || !normal_window(hwnd)
-            || window_pid(hwnd) == std::process::id()
+            || pid == 0
+            || pid == std::process::id()
             || unsafe { GetWindowTextLengthW(hwnd) } == 0
             || pin::is_pinned(hwnd.0)
+            || !is_title_bar(hwnd, point, TITLE_HIT_TIMEOUT_MS)
         {
             return false;
         }
         let gesture = Arc::new(Gesture {
-            target: WindowKey {
-                hwnd: hwnd.0,
-                pid: window_pid(hwnd),
-            },
+            target: WindowKey { hwnd: hwnd.0, pid },
             origin: point,
             latest: Mutex::new((point, false)),
         });
@@ -395,14 +401,10 @@ fn remember_group(groups: &mut Vec<Vec<WindowKey>>, members: Vec<WindowKey>) {
     }
 }
 
-fn raise_group(groups: &[Vec<WindowKey>], target: WindowKey, point: POINT) {
-    let Some(group) = groups.iter().find(|group| group.contains(&target)) else {
-        return;
-    };
-    let hwnd = HWND(target.hwnd);
+fn is_title_bar(hwnd: HWND, point: POINT, timeout_ms: u32) -> bool {
     // 負座標を含むスクリーン座標を WM_NCHITTEST の符号付き16ビット2成分へ格納する。
     let (Ok(x), Ok(y)) = (i16::try_from(point.x), i16::try_from(point.y)) else {
-        return;
+        return false;
     };
     let packed = (u32::from(y as u16) << 16) | u32::from(x as u16);
     let mut hit = 0usize;
@@ -412,14 +414,18 @@ fn raise_group(groups: &[Vec<WindowKey>], target: WindowKey, point: POINT) {
             WM_NCHITTEST,
             WPARAM(0),
             LPARAM(packed as isize),
-            SMTO_ABORTIFHUNG | SMTO_ERRORONEXIT,
-            75,
+            SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT,
+            timeout_ms,
             Some(&mut hit),
         )
     };
-    if result.0 == 0 || hit != HTCAPTION as usize {
+    result.0 != 0 && hit == HTCAPTION as usize
+}
+
+fn raise_group(groups: &[Vec<WindowKey>], target: WindowKey) {
+    let Some(group) = groups.iter().find(|group| group.contains(&target)) else {
         return;
-    }
+    };
     // 通常のクリックで選択されたウィンドウのフォーカスを保ち、同じグループだけを上げる。
     for key in group
         .iter()
@@ -553,6 +559,71 @@ mod tests {
         assert!(config.drag_snap_to_work_area && config.drag_resize_across_monitors);
         let hook = install_hook().expect("Windowsのマウスフックを登録");
         unsafe { UnhookWindowsHookEx(hook) }.expect("試験フックを解除");
+    }
+
+    #[test]
+    fn only_the_native_caption_is_a_drag_handle() {
+        use windows::core::w;
+        use windows::Win32::Graphics::Gdi::ClientToScreen;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, UnregisterClassW,
+            HMENU, WINDOW_EX_STYLE, WNDCLASSW, WS_OVERLAPPEDWINDOW,
+        };
+
+        unsafe extern "system" fn window_proc(
+            hwnd: HWND,
+            message: u32,
+            wparam: WPARAM,
+            lparam: LPARAM,
+        ) -> LRESULT {
+            DefWindowProcW(hwnd, message, wparam, lparam)
+        }
+
+        unsafe {
+            let name = w!("ChuwitchWindowCaptionHitTest");
+            let instance = HINSTANCE(GetModuleHandleW(None).unwrap().0);
+            assert_ne!(
+                RegisterClassW(&WNDCLASSW {
+                    lpfnWndProc: Some(window_proc),
+                    hInstance: instance,
+                    lpszClassName: name,
+                    ..Default::default()
+                }),
+                0
+            );
+            let hwnd = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                name,
+                name,
+                WS_OVERLAPPEDWINDOW,
+                -500,
+                100,
+                400,
+                260,
+                HWND::default(),
+                HMENU::default(),
+                instance,
+                None,
+            );
+            assert_ne!(hwnd.0, 0);
+            let mut content = POINT { x: 160, y: 0 };
+            assert!(ClientToScreen(hwnd, &mut content).as_bool());
+            let caption = POINT {
+                x: content.x,
+                y: content.y - 6,
+            };
+            let inside = POINT {
+                x: content.x,
+                y: content.y + 40,
+            };
+            let hits = (
+                is_title_bar(hwnd, caption, TITLE_HIT_TIMEOUT_MS),
+                is_title_bar(hwnd, inside, TITLE_HIT_TIMEOUT_MS),
+            );
+            DestroyWindow(hwnd).unwrap();
+            UnregisterClassW(name, instance).unwrap();
+            assert_eq!(hits, (true, false));
+        }
     }
 
     #[test]

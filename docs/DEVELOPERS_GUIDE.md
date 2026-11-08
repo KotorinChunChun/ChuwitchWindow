@@ -30,7 +30,7 @@ npm test
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-フロントは Vitest + jsdom（`src/**/*.test.ts(x)`）。Rust は `#[cfg(test)]` の単体テスト。どちらも実 HWND や `SetWindowPos` は呼ばない。
+フロントは Vitest + jsdom（`src/**/*.test.ts(x)`）。Rust は `#[cfg(test)]` の単体テスト。タイトルバーの判定は非表示の試験ウィンドウで確認する。
 
 ## プロジェクト構成
 

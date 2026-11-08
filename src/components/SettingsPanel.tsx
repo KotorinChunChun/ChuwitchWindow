@@ -155,7 +155,7 @@ export function SettingsPanel({
                         <div className="space-y-4">
                             <ToggleOption
                                 label="中ボタンドラッグでウィンドウを移動"
-                                tooltip="修飾キーを押さずに、ウィンドウ内を中ボタンでドラッグします。有効時は対象ウィンドウ内の中クリックを移動操作が使います。"
+                                tooltip="修飾キーを押さずに、タイトルバーを中ボタンでドラッグします。ウィンドウ内の中クリックはアプリが処理します。"
                                 checked={config.middle_drag_enabled}
                                 onChange={(v) => updateConfig({ middle_drag_enabled: v })}
                             />
