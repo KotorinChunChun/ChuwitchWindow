@@ -33,6 +33,19 @@ npm run tauri build
 
 ビルド成果物は `src-tauri/target/release/chuwitchwindow.exe` に出力されます。
 
+`src-tauri/icons/` はリポジトリに含まれていません（`.gitignore` 対象）。クローン直後はビルドが通らないため、元画像から生成してください。
+
+```powershell
+npx tauri icon <アイコン画像.png>
+```
+
+### テスト
+
+```powershell
+cd src-tauri
+cargo test
+```
+
 ## 📁 プロジェクト構成
 
 ```
@@ -42,26 +55,36 @@ npm run tauri build
 │   ├── SPECv0.2.md           # 次期アップデート(v0.2)仕様書
 │   ├── DEV.md              # 開発者向けドキュメント
 ├── src/                    # フロントエンド (React + TypeScript)
-│   ├── App.tsx             # メインアプリケーション
+│   ├── App.tsx             # メインアプリケーション（#arrange のときは整列ポップアップ）
+│   ├── types.ts            # 型定義
 │   ├── components/
-│   │   ├── MonitorMap.tsx   # モニター配置マップ
-│   │   └── SettingsPanel.tsx # 設定パネル
-│   ├── lib/
-│   │   └── utils.ts        # ユーティリティ (cn 関数等)
-│   └── types/
-│       └── index.ts        # 型定義
+│   │   ├── Sidebar.tsx         # タブ切り替え
+│   │   ├── MonitorMap.tsx      # モニター配置マップ
+│   │   ├── ExclusionPanel.tsx  # 除外ルールの編集
+│   │   ├── SettingsPanel.tsx   # 設定パネル
+│   │   ├── AboutTab.tsx        # バージョン情報・実行ログ
+│   │   ├── ArrangePopup.tsx    # 自動整列の選択画面
+│   │   └── CustomDialog.tsx    # 確認・通知ダイアログ
+│   └── lib/
+│       ├── ruleUtils.ts    # 除外ルールの判定・ツリー操作
+│       └── utils.ts        # ユーティリティ (cn 関数等)
 ├── src-tauri/              # バックエンド (Rust / Tauri 2)
 │   └── src/
-│       ├── lib.rs          # エントリポイント・コマンド定義
+│       ├── lib.rs          # エントリポイント・ウィンドウ管理・CLI引数の処理
+│       ├── commands.rs     # フロントエンドから呼ぶ Tauri コマンド
+│       ├── action.rs       # ホットキー・CLI 引数から実行する操作の定義
 │       ├── config.rs       # 設定の読み書き
 │       ├── monitor.rs      # モニター情報の取得
-│       ├── window.rs       # ウィンドウ操作
-│       ├── logic.rs        # 入れ替えロジック
+│       ├── window.rs       # ウィンドウの列挙・移動
+│       ├── logic.rs        # シフト・入れ替え・退避・集約のロジック
+│       ├── arrange.rs      # 自動整列
+│       ├── pin.rs          # 一時ピン留め
+│       ├── rule.rs         # 除外ルールの判定
 │       ├── hotkey.rs       # グローバルホットキー管理
 │       ├── tray.rs         # システムトレイ
 │       ├── hotplug.rs      # モニターの接続/切断検知
 │       ├── history.rs      # Undo履歴管理
-│       ├── admin.rs        # 管理者権限・スタートアップ
+│       ├── admin.rs        # 管理者権限・スタートアップ・PATH 登録
 │       └── logger.rs       # ログ出力
 ├── package.json
 ├── vite.config.ts
@@ -70,12 +93,12 @@ npm run tauri build
 
 ## � バージョン管理
 
-バージョンアップ時には、以下の4箇所のバージョン表記を揃える必要があります。
+バージョンアップ時には、以下の3箇所のバージョン表記を揃える必要があります。
+設定画面（アプリについてタブ）のバージョン表示は `tauri.conf.json` の値を実行時に取得しています。
 
 1.  **`src-tauri/Cargo.toml`**: Rustバイナリのバージョン。
 2.  **`src-tauri/tauri.conf.json`**: アプリケーション設定およびインストーラー用。
 3.  **`package.json`**: Node.jsプロジェクトとしてのバージョン。
-4.  **`src/App.tsx`**: 設定画面（アプリについてタブ）に表示されるバージョンと更新日。
 
 ### 自動更新スクリプト
 
@@ -83,10 +106,8 @@ npm run tauri build
 
 ```powershell
 # 使用例 (v0.2.1 に更新する場合)
-./scripts/update_version.ps1 -NewVersion "0.2.1"
+pwsh -File ./scripts/update_version.ps1 -NewVersion "0.2.1"
 ```
-
-このスクリプトは、設定画面の日付も実行時の日付（YYYY.MM.DD）に自動更新します。
 
 ## �📝 技術スタック
 

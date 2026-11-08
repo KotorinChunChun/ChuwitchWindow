@@ -19,7 +19,8 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "quit" => std::process::exit(0),
+            // app.exit() で終了すると、トレイアイコンが残骸として残らないよう後始末される
+            "quit" => app.exit(0),
             "restart" => app.restart(),
             "settings" => {
                 crate::show_main_window(app);
@@ -28,12 +29,9 @@ pub fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         })
         .on_tray_icon_event(|tray, event| match event {
             TrayIconEvent::Click { button: MouseButton::Left, .. } => {
+                // 設定画面が開いている場合のみ前面へ出す（破棄済みなら再生成はダブルクリックで行う）
                 if let Some(window) = tray.app_handle().get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_always_on_top(true);
-                    let _ = window.set_always_on_top(false);
-                    let _ = window.set_focus();
+                    crate::bring_to_front(&window);
                 }
             }
             TrayIconEvent::DoubleClick { button: MouseButton::Left, .. } => {

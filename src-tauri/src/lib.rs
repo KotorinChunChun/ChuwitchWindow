@@ -1,3 +1,4 @@
+pub mod action;
 pub mod admin;
 pub mod arrange;
 pub mod commands;
@@ -15,16 +16,21 @@ pub mod window;
 
 use tauri::{AppHandle, Manager};
 
+/// 他のウィンドウの裏に隠れていても確実に前面へ出してフォーカスする
+pub(crate) fn bring_to_front(window: &tauri::WebviewWindow) {
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_always_on_top(true);
+    let _ = window.set_always_on_top(false);
+    let _ = window.set_focus();
+}
+
 pub fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_always_on_top(true);
-        let _ = window.set_always_on_top(false);
-        let _ = window.set_focus();
+        bring_to_front(&window);
     } else {
         // ウィンドウが存在しなければ再生成
-        if let Ok(builder) = tauri::WebviewWindowBuilder::new(
+        if let Ok(window) = tauri::WebviewWindowBuilder::new(
             app,
             "main",
             tauri::WebviewUrl::App("index.html".into())
@@ -34,11 +40,9 @@ pub fn show_main_window(app: &AppHandle) {
         .resizable(true)
         .visible(true)
         .build() {
-            let _ = builder.set_always_on_top(true);
-            let _ = builder.set_always_on_top(false);
-            let _ = builder.set_focus();
+            bring_to_front(&window);
             // maximizedはビルド後に適用させる必要がある場合があるため
-            let _ = builder.maximize();
+            let _ = window.maximize();
         }
     }
 }
@@ -60,17 +64,18 @@ pub fn show_arrange_window(app: &AppHandle) {
     // ウィンドウを表示する「前」に対象モニターを記憶する。
     // この時点では arrange ウィンドウがまだ最前面でないため、
     // GetForegroundWindow() が正しいユーザーのウィンドウを指している。
-    if let Some(monitor) = get_active_monitor_info() {
+    let active_monitor = get_active_monitor_info();
+    if let Some(monitor) = &active_monitor {
         arrange::set_target_hmonitor(monitor.hmonitor);
     }
 
     if let Some(window) = app.get_webview_window("arrange") {
         let _ = window.show();
         let _ = window.set_focus();
-        
+
         // 中心に移動させる処理
-        if let Some(monitor) = get_active_monitor_info() {
-            let (x, y) = calc_center_position(&monitor, ARRANGE_WINDOW_WIDTH, ARRANGE_WINDOW_HEIGHT);
+        if let Some(monitor) = &active_monitor {
+            let (x, y) = calc_center_position(monitor, ARRANGE_WINDOW_WIDTH, ARRANGE_WINDOW_HEIGHT);
             let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
                 x: x as i32,
                 y: y as i32,
@@ -94,8 +99,8 @@ pub fn show_arrange_window(app: &AppHandle) {
         .resizable(false)
         .center();
 
-        if let Some(monitor) = get_active_monitor_info() {
-            let (x, y) = calc_center_position(&monitor, ARRANGE_WINDOW_WIDTH, ARRANGE_WINDOW_HEIGHT);
+        if let Some(monitor) = &active_monitor {
+            let (x, y) = calc_center_position(monitor, ARRANGE_WINDOW_WIDTH, ARRANGE_WINDOW_HEIGHT);
             builder = builder.position(x, y);
         }
 
@@ -103,22 +108,11 @@ pub fn show_arrange_window(app: &AppHandle) {
     }
 }
 
-// ------------------------------------
-// ArrangePopup 用のユーティリティ関数
-// ------------------------------------
+/// フォアグラウンドウィンドウが表示されているモニターの情報を返す
 fn get_active_monitor_info() -> Option<crate::monitor::MonitorInfo> {
-    unsafe {
-        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-        use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
-        
-        let hwnd = GetForegroundWindow();
-        if hwnd.0 == 0 { return None; }
-        
-        let hmonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        
-        let monitors = crate::monitor::get_all_monitors();
-        monitors.into_iter().find(|m| m.hmonitor == hmonitor.0 as isize)
-    }
+    let monitors = crate::monitor::get_all_monitors();
+    let idx = crate::monitor::get_active_monitor_index(&monitors)?;
+    monitors.into_iter().nth(idx)
 }
 
 pub fn hide_arrange_window(app: &AppHandle) {
@@ -131,34 +125,10 @@ pub fn hide_arrange_window(app: &AppHandle) {
 /// CLI引数をディスパッチする共通関数。
 /// 引数の中にアクションコマンドが含まれていれば実行し、1つでも実行したら true を返す。
 fn dispatch_cli_action(app: &AppHandle, args: &[String]) -> bool {
-    use tauri::Emitter;
     let mut matched = false;
-    for arg in args {
-        if arg == "--rotate-cw" {
-            crate::logic::handle_rotate(app, true);
-            matched = true;
-        } else if arg == "--rotate-ccw" {
-            crate::logic::handle_rotate(app, false);
-            matched = true;
-        } else if arg == "--undo" {
-            crate::logic::handle_undo(app);
-            matched = true;
-        } else if arg == "--pin-toggle" {
-            crate::pin::toggle_pin();
-            let _ = app.emit("pin-toggled", ());
-            matched = true;
-        } else if arg == "--escape" {
-            crate::logic::handle_escape(app);
-            matched = true;
-        } else if arg == "--gather" {
-            crate::logic::handle_gather(app);
-            matched = true;
-        } else if let Some(target_str) = arg.strip_prefix("--swap=") {
-            if let Ok(target) = target_str.parse::<u32>() {
-                crate::logic::handle_swap_target(app, target);
-                matched = true;
-            }
-        }
+    for action in args.iter().filter_map(|arg| action::Action::from_cli_arg(arg)) {
+        action::execute(app, action);
+        matched = true;
     }
     matched
 }
@@ -182,9 +152,8 @@ pub fn run() {
             let _ = tray::setup_tray(app.handle());
 
             // 引数に --autostart, --hide, -hide が含まれていない場合のみウィンドウを表示（GUIからの通常起動）
-            if !args.contains(&"--autostart".to_string()) 
-                && !args.contains(&"--hide".to_string()) 
-                && !args.contains(&"-hide".to_string()) {
+            let hidden = args.iter().any(|arg| matches!(arg.as_str(), "--autostart" | "--hide" | "-hide"));
+            if !hidden {
                 crate::show_main_window(app.handle());
             } else {
                 // 自動起動・非表示時はメインウィンドウを破棄してメモリ削減
@@ -215,7 +184,6 @@ pub fn run() {
             commands::sync_admin_startup,
             commands::check_autostart_registered_cmd,
             commands::get_all_monitors_cmd,
-            commands::trigger_action,
             commands::check_hotkey_conflict_cmd,
             commands::set_recording_state_cmd,
             commands::reset_config_cmd,
@@ -238,6 +206,12 @@ pub fn run() {
                 tauri::WindowEvent::CloseRequested { .. } => {
                     // 何もしなければそのままWindowがClose（破棄）される
                 }
+                tauri::WindowEvent::Destroyed => {
+                    // ショートカット入力の録画中に設定画面を閉じられても、ホットキーが無効のまま残らないようにする
+                    if window.label() == "main" {
+                        hotkey::set_recording_state(false);
+                    }
+                }
                 tauri::WindowEvent::Focused(focused) => {
                     // フォーカスが外れた場合、ArrangePopupなら破棄してメモリを解放する
                     if !focused && window.label() == "arrange" {
@@ -256,10 +230,11 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| match event {
-            tauri::RunEvent::ExitRequested { api, .. } => {
+        .run(|_app_handle, event| {
+            // 全ウィンドウが閉じられただけ（code: None）なら常駐を続ける。
+            // app.exit() による明示的な終了（ワンショット実行・トレイの「終了」）は止めない。
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
                 api.prevent_exit();
             }
-            _ => {}
         });
 }

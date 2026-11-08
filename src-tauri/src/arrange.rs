@@ -1,8 +1,7 @@
 use crate::monitor::{MonitorInfo, MonitorRect};
-use crate::window::{WindowInfo};
-use crate::history::{HistoryState, MoveAction};
+use crate::window::WindowInfo;
+use crate::history::HistoryState;
 use tauri::Manager;
-use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, SWP_NOACTIVATE, HWND_TOP};
 use tracing::info;
 use std::sync::{Mutex, OnceLock};
 
@@ -183,37 +182,19 @@ pub fn handle_arrange(app: &tauri::AppHandle, arrange_type: ArrangeType) {
     let new_rects = calculate_layout(&targets, &available_area, arrange_type);
 
     // 5. 履歴保存と実行
-    let history_state = app.state::<HistoryState>();
-    let mut actions = Vec::new();
+    app.state::<HistoryState>().push_windows(&targets);
 
-    for (i, win) in targets.iter().enumerate() {
-        let new_rect = &new_rects[i];
+    for (win, new_rect) in targets.iter().zip(&new_rects) {
         info!("[arrange]   MOVE hwnd={} \"{}\" ({},{})–({},{}) → ({},{})–({},{})",
             win.hwnd, win.title,
             win.rect.left, win.rect.top, win.rect.right, win.rect.bottom,
             new_rect.left, new_rect.top, new_rect.right, new_rect.bottom);
-        actions.push(MoveAction {
-            hwnd: win.hwnd,
-            old_rect: win.rect.clone(),
-            new_rect: new_rect.clone(),
-        });
-
-        unsafe {
-            let result = SetWindowPos(
-                windows::Win32::Foundation::HWND(win.hwnd as isize),
-                HWND_TOP,
-                new_rect.left,
-                new_rect.top,
-                new_rect.right - new_rect.left,
-                new_rect.bottom - new_rect.top,
-                SWP_NOACTIVATE,
-            );
-            if result.is_err() {
-                info!("[arrange]   SetWindowPos 失敗: hwnd={}", win.hwnd);
-            }
+        // 最大化したままでは並べた位置に収まらないため、通常表示に戻してから配置する
+        if win.is_maximized {
+            crate::window::restore_window(win.hwnd);
         }
+        crate::window::set_window_rect(win.hwnd, new_rect);
     }
-    history_state.push(actions);
     info!("[arrange] 完了: {} 件を整列 / モニター={} / 使用エリア=({},{})–({},{})",
         targets.len(), target_monitor.name,
         available_area.left, available_area.top,

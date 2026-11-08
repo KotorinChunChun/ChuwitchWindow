@@ -19,7 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SW_SHOWMAXIMIZED, SW_SHOWMINIMIZED, GetWindowLongW, GWL_STYLE, GWL_EXSTYLE, WS_CAPTION, WS_THICKFRAME,
 };
 
-use crate::monitor::MonitorRect;
+use crate::monitor::{MonitorInfo, MonitorRect};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowInfo {
@@ -41,7 +41,7 @@ pub struct WindowInfo {
 struct EnumState {
     windows: Vec<WindowInfo>,
     vdm: Option<IVirtualDesktopManager>,
-    monitors: Vec<crate::monitor::MonitorInfo>,
+    monitors: Vec<MonitorInfo>,
     ignore_fullscreen: bool,
     /// v0.2: 最小化ウィンドウを移動対象から除外するか
     exclude_minimized: bool,
@@ -83,10 +83,7 @@ fn is_cloaked(hwnd: HWND) -> bool {
             std::mem::size_of::<i32>() as u32,
         )
     };
-    if res.is_ok() && cloaked != 0 {
-        return true;
-    }
-    false
+    res.is_ok() && cloaked != 0
 }
 
 fn is_on_current_desktop(hwnd: HWND, vdm: Option<&IVirtualDesktopManager>) -> bool {
@@ -113,6 +110,44 @@ fn get_window_title(hwnd: HWND) -> String {
     }
 }
 
+/// プロセス ID から実行ファイル名（例: "notepad.exe"）を取得する ― 除外ルール用 (v0.2)
+fn get_process_name(pid: u32) -> String {
+    if pid == 0 {
+        return String::new();
+    }
+    unsafe {
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+            return String::new();
+        };
+        let mut buf = [0u16; 260];
+        let mut len = buf.len() as u32;
+        let result = QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_FORMAT(0),
+            windows::core::PWSTR(buf.as_mut_ptr()),
+            &mut len,
+        );
+        let _ = CloseHandle(process);
+        if result.is_err() {
+            return String::new();
+        }
+        let full_path = OsString::from_wide(&buf[..len as usize]).to_string_lossy().into_owned();
+        // フルパスからファイル名部分のみ抽出
+        full_path.rsplit('\\').next().unwrap_or(&full_path).to_string()
+    }
+}
+
+/// ウィンドウクラス名（例: "Notepad"）を取得する ― 除外ルール用 (v0.2)
+fn get_class_name(hwnd: HWND) -> String {
+    let mut buf = [0u16; 256];
+    let len = unsafe { GetClassNameW(hwnd, &mut buf) };
+    if len > 0 {
+        OsString::from_wide(&buf[..len as usize]).to_string_lossy().into_owned()
+    } else {
+        String::new()
+    }
+}
+
 // EnumWindows callback
 unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let state = &mut *(lparam.0 as *mut EnumState);
@@ -123,8 +158,8 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
 
     // 自プロセスのウィンドウは除外（設定画面やポップアップなど）
     let mut pid: u32 = 0;
-    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-    if unsafe { GetCurrentProcessId() } == pid {
+    GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    if GetCurrentProcessId() == pid {
         return BOOL(1);
     }
 
@@ -166,8 +201,8 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
     let is_maximized = placement.showCmd == SW_SHOWMAXIMIZED.0 as u32;
     let is_minimized = placement.showCmd == SW_SHOWMINIMIZED.0 as u32;
 
-    let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) } as u32;
-    let ex_style = unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32;
+    let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+    let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
     let has_caption = (style & WS_CAPTION.0) == WS_CAPTION.0;
     let has_thickframe = (style & WS_THICKFRAME.0) == WS_THICKFRAME.0;
 
@@ -188,52 +223,16 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
         return BOOL(1);
     }
 
-    // --- v0.2: プロセス名を取得 ---
-    let process_name = {
-        let mut pid: u32 = 0;
-        GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        if pid != 0 {
-            if let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
-                let mut buf = [0u16; 260];
-                let mut len = buf.len() as u32;
-                if QueryFullProcessImageNameW(process, PROCESS_NAME_FORMAT(0), windows::core::PWSTR(buf.as_mut_ptr()), &mut len).is_ok() {
-                    let full_path = OsString::from_wide(&buf[..len as usize]).to_string_lossy().into_owned();
-                    let _ = CloseHandle(process);
-                    // フルパスからファイル名部分のみ抽出
-                    full_path.rsplit('\\').next().unwrap_or(&full_path).to_string()
-                } else {
-                    let _ = CloseHandle(process);
-                    String::new()
-                }
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        }
-    };
-
-    // --- v0.2: ウィンドウクラス名を取得 ---
-    let class_name = {
-        let mut buf = [0u16; 256];
-        let len = GetClassNameW(hwnd, &mut buf);
-        if len > 0 {
-            OsString::from_wide(&buf[..len as usize]).to_string_lossy().into_owned()
-        } else {
-            String::new()
-        }
-    };
-
     state.windows.push(WindowInfo {
-        hwnd: hwnd.0 as isize,
+        hwnd: hwnd.0,
         title,
         rect: rect.into(),
         dpi,
         is_maximized,
         is_minimized,
         is_fullscreen,
-        process_name,
-        class_name,
+        process_name: get_process_name(pid),
+        class_name: get_class_name(hwnd),
         style,
         ex_style,
     });
@@ -243,8 +242,8 @@ unsafe extern "system" fn enum_window_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
 
 fn apply_snap_correction(
     window_rect: &MonitorRect,
-    src_work: &crate::monitor::MonitorRect,
-    dest_work: &crate::monitor::MonitorRect,
+    src_work: &MonitorRect,
+    dest_work: &MonitorRect,
 ) -> Option<(i32, i32, i32, i32)> {
     let tolerance = 15; // 隠し境界線等の誤差を吸収
     let is_approx = |a: i32, b: i32| (a - b).abs() <= tolerance;
@@ -287,18 +286,13 @@ fn apply_snap_correction(
     None
 }
 
-pub fn move_window(
-    win: &WindowInfo,
-    src_monitor: &crate::monitor::MonitorInfo,
-    dest_monitor: &crate::monitor::MonitorInfo,
-    hwnd_insert_after: isize,
-) {
-    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, ShowWindow, SWP_NOACTIVATE, HWND_TOP, SW_RESTORE, SW_MAXIMIZE};
-
-    let hwnd = HWND(win.hwnd);
-    let window_rect = &win.rect;
-    
-    let (new_x, new_y, new_w, new_h) = if let Some(snap) = apply_snap_correction(window_rect, &src_monitor.work_area, &dest_monitor.work_area) {
+/// 移動元モニターでの位置・サイズを、移動先モニターのワークエリアへ写した矩形を計算する
+fn map_rect_to_monitor(
+    window_rect: &MonitorRect,
+    src_monitor: &MonitorInfo,
+    dest_monitor: &MonitorInfo,
+) -> MonitorRect {
+    let (x, y, w, h) = if let Some(snap) = apply_snap_correction(window_rect, &src_monitor.work_area, &dest_monitor.work_area) {
         snap
     } else {
         // Fallback to ratio scaling
@@ -306,13 +300,13 @@ pub fn move_window(
         let src_h = src_monitor.work_area.bottom - src_monitor.work_area.top;
         let win_w = window_rect.right - window_rect.left;
         let win_h = window_rect.bottom - window_rect.top;
-        
+
         let ratio_x = (dest_monitor.work_area.right - dest_monitor.work_area.left) as f32 / src_w as f32;
         let ratio_y = (dest_monitor.work_area.bottom - dest_monitor.work_area.top) as f32 / src_h as f32;
-        
+
         let rel_x = window_rect.left - src_monitor.work_area.left;
         let rel_y = window_rect.top - src_monitor.work_area.top;
-        
+
         (
             dest_monitor.work_area.left + (rel_x as f32 * ratio_x).round() as i32,
             dest_monitor.work_area.top + (rel_y as f32 * ratio_y).round() as i32,
@@ -320,38 +314,96 @@ pub fn move_window(
             (win_h as f32 * ratio_y).round() as i32
         )
     };
+    MonitorRect { left: x, top: y, right: x + w, bottom: y + h }
+}
 
-    unsafe {
-        let insert_after = if hwnd_insert_after == 0 {
-            HWND_TOP
-        } else {
-            HWND(hwnd_insert_after)
-        };
-        
-        if win.is_maximized {
-            let _ = ShowWindow(hwnd, SW_RESTORE);
-        }
-
-        let _ = SetWindowPos(
-            hwnd,
-            insert_after,
-            new_x,
-            new_y,
-            new_w,
-            new_h,
+/// ウィンドウを指定の矩形へ移動し、Z オーダーの先頭に置く（アクティブにはしない）
+pub fn set_window_rect(hwnd: isize, rect: &MonitorRect) {
+    use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOP, SWP_NOACTIVATE};
+    let result = unsafe {
+        SetWindowPos(
+            HWND(hwnd),
+            HWND_TOP,
+            rect.left,
+            rect.top,
+            rect.right - rect.left,
+            rect.bottom - rect.top,
             SWP_NOACTIVATE,
-        );
+        )
+    };
+    if result.is_err() {
+        tracing::info!("SetWindowPos 失敗: hwnd={}", hwnd);
+    }
+}
 
-        if win.is_maximized {
-            let _ = ShowWindow(hwnd, SW_MAXIMIZE);
+/// 最大化中のウィンドウを通常表示に戻す
+pub fn restore_window(hwnd: isize) {
+    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_RESTORE};
+    unsafe {
+        let _ = ShowWindow(HWND(hwnd), SW_RESTORE);
+    }
+}
+
+/// ウィンドウを指定の矩形へ配置する。
+/// `maximized` が true なら、いったん通常表示に戻して移動した後に最大化し直す
+/// （最大化したまま移動すると、移動先のモニターで最大化状態にならないため）。
+pub fn place_window(hwnd: isize, rect: &MonitorRect, maximized: bool) {
+    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_MAXIMIZE};
+    if maximized {
+        restore_window(hwnd);
+    }
+    set_window_rect(hwnd, rect);
+    if maximized {
+        unsafe {
+            let _ = ShowWindow(HWND(hwnd), SW_MAXIMIZE);
         }
     }
 }
 
-pub fn move_windows(windows_to_move: &[WindowInfo], src_monitor: &crate::monitor::MonitorInfo, dest_monitor: &crate::monitor::MonitorInfo) {
+pub fn move_windows(windows_to_move: &[WindowInfo], src_monitor: &MonitorInfo, dest_monitor: &MonitorInfo) {
     // windows_to_move is sorted top to bottom (Z-order).
     // By processing bottom to top and placing them at HWND_TOP, their relative Z-order on the new monitor is perfectly restored.
     for win in windows_to_move.iter().rev() {
-        move_window(win, src_monitor, dest_monitor, 0); // 0 corresponds to HWND_TOP
+        let new_rect = map_rect_to_monitor(&win.rect, src_monitor, dest_monitor);
+        place_window(win.hwnd, &new_rect, win.is_maximized);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn monitor(left: i32, top: i32, right: i32, bottom: i32) -> MonitorInfo {
+        let area = MonitorRect { left, top, right, bottom };
+        MonitorInfo {
+            hmonitor: 0,
+            name: "M".to_string(),
+            display_number: 1,
+            manufacturer: String::new(),
+            serial_number: String::new(),
+            work_area: area.clone(),
+            monitor_area: area,
+            is_primary: false,
+        }
+    }
+
+    #[test]
+    fn test_map_rect_scales_by_ratio() {
+        // 1920x1080 → 3840x2160 へ移すと位置・サイズとも 2 倍になる
+        let src = monitor(0, 0, 1920, 1080);
+        let dest = monitor(1920, 0, 1920 + 3840, 2160);
+        let rect = MonitorRect { left: 100, top: 100, right: 500, bottom: 400 };
+        let mapped = map_rect_to_monitor(&rect, &src, &dest);
+        assert_eq!(mapped, MonitorRect { left: 2120, top: 200, right: 2920, bottom: 800 });
+    }
+
+    #[test]
+    fn test_map_rect_keeps_left_snap() {
+        // 左半分にスナップしたウィンドウは、移動先でも左半分になる
+        let src = monitor(0, 0, 1920, 1080);
+        let dest = monitor(1920, 0, 1920 + 2560, 1440);
+        let rect = MonitorRect { left: 0, top: 0, right: 960, bottom: 1080 };
+        let mapped = map_rect_to_monitor(&rect, &src, &dest);
+        assert_eq!(mapped, MonitorRect { left: 1920, top: 0, right: 1920 + 1280, bottom: 1440 });
     }
 }

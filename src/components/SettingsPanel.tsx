@@ -413,10 +413,17 @@ function HotkeyInput({
             setTempValue(value);
             checkConflict(value);
         }
-
-        // バックエンドにも録画状態を伝え、ショートカット機能を一時無効化する
-        invoke("set_recording_state_cmd", { isRecording }).catch(console.error);
     }, [value, isRecording]);
+
+    // 録画中はバックエンドのショートカット機能を一時無効化する。
+    // 録画終了時だけでなく、録画中にタブ切り替え等でアンマウントされた場合も解除する。
+    useEffect(() => {
+        if (!isRecording) return;
+        invoke("set_recording_state_cmd", { isRecording: true }).catch(console.error);
+        return () => {
+            invoke("set_recording_state_cmd", { isRecording: false }).catch(console.error);
+        };
+    }, [isRecording]);
 
     const checkConflict = async (hotkeyStr: string) => {
         if (!hotkeyStr) {
