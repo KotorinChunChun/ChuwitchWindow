@@ -102,7 +102,6 @@ ChuwitchWindow --swap 1 2
 | 右クリック → 再起動 | アプリを再起動 |
 | 右クリック → 終了   | アプリを終了   |
 
-![](https://private-user-images.githubusercontent.com/55196383/553078983-6410993e-9b87-4cf7-861e-b31b97f33570.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzE3NjMzODAsIm5iZiI6MTc3MTc2MzA4MCwicGF0aCI6Ii81NTE5NjM4My81NTMwNzg5ODMtNjQxMDk5M2UtOWI4Ny00Y2Y3LTg2MWUtYjMxYjk3ZjMzNTcwLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMjIlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjIyVDEyMjQ0MFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPThiZTAwNmM3ZGM2M2IzZTUyYzZlYjBkNjM2MjdjZWRmMDI2NzQyN2I0YTQyNWExOWFmN2FhNDM3YThkMjc0NGMmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.xE86VVABk3cmajwNMk26Cd-zJnEVcYJlmEfPCW4y2qI)
 
 ### ウィンドウの動作
 
@@ -126,7 +125,6 @@ ChuwitchWindow --swap 1 2
 - モニタにグループ色を設定できます。（同じ色のモニター間でウィンドウを一斉交換できるようになります）
 - 順位を設定できます。（巡回シフトの順番を変更できます）
 
-![](https://private-user-images.githubusercontent.com/55196383/553030517-cbf31a7a-6e69-4069-9ece-7535cc373c4b.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzE3NjMzODAsIm5iZiI6MTc3MTc2MzA4MCwicGF0aCI6Ii81NTE5NjM4My81NTMwMzA1MTctY2JmMzFhN2EtNmU2OS00MDY5LTllY2UtNzUzNWNjMzczYzRiLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMjIlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjIyVDEyMjQ0MFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTllODkxMzcyM2JmZjgwNjExZTliMzZiM2VmYmJlM2E2YmFjMGJlYThkYmRjZDFjMTIyMzFjMGRlMmIxZTA1OWImWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.hFUvWM8MP2AJQiPupVOlqtLIn2K970LOSHQ7cL5m-po)
 
 ### 設定・常駐
 
@@ -136,13 +134,46 @@ ChuwitchWindow --swap 1 2
 - フルクリーンアプリの扱いを変更できます。
 - 【v0.2】最小化されたウィンドウを移動対象から除外するか設定できます。
 
-![](https://private-user-images.githubusercontent.com/55196383/553030503-3193eb73-6f15-4cf4-8a7e-34a94d00571a.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzE3NjMzODAsIm5iZiI6MTc3MTc2MzA4MCwicGF0aCI6Ii81NTE5NjM4My81NTMwMzA1MDMtMzE5M2ViNzMtNmYxNS00Y2Y0LThhN2UtMzRhOTRkMDA1NzFhLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMjIlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjIyVDEyMjQ0MFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWFlMjQ1M2E4NzU0ZjkxMjAwMDE2OGM1ZDMwZDU2NmM1YjBlNWNhZDg2NjZkMTZlMDRiYWNmMGZmYTY5ZDRkMGEmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.c3UaAfmygZkI9oXZvHI-M5OhtbiElO72KS3M3mrNlXA)
 
 ### 🛡️ 管理者権限について
 
 - 通常は一般ユーザー権限で動作しますが、その場合は管理者権限で実行されているアプリを移動させることができません。
 - 管理者権限ウィンドウも操作対象にしたい場合は、設定画面から **「管理者として再起動する」** を実行してください。
 - スタートアップの登録・解除にも管理者権限が必要です。
+
+## 画面で見る使い方
+
+以下は0.2.1の画面です。説明用の2画面構成と隔離設定で撮影しており、実際のウィンドウ移動は行っていません。
+
+### 1. モニターの配置を確認する
+
+「モニター構成」で番号・サイズ・配置を確認します。
+
+![モニター構成の入口。説明用の2画面が並ぶ](docs/images/readme/01-monitors.png)
+
+### 2. 動作とショートカットを設定する
+
+「設定・常駐」で動作を選びます。下の項目はスクロールして確認できます。
+
+![動作設定とショートカットキーの一覧](docs/images/readme/02-settings.png)
+
+### 3. モニターを選んでグループを指定する
+
+図のモニターをクリックすると、順位・プライマリ・グループのボタンが表示されます。
+
+![モニター選択後に表示される設定ボタン](docs/images/readme/03-monitor-options.png)
+
+### 4. 保存されたグループを確認する
+
+例では「G1」を選び、モニター1に赤いグループ色とG1が反映されています。設定は自動保存されます。グループ内だけで移動する場合は「設定・常駐」の「グループ内で入れ替えを行う」も有効にします。
+
+![G1の選択がモニターに反映された結果](docs/images/readme/04-group-saved.png)
+
+### 5. 動かしたくないウィンドウを除外する
+
+「除外リスト」でプロセス名やタイトルなどの条件を指定します。条件式ツリー・入力欄・JSON欄が収まらない場合は横方向にもスクロールできます。
+
+![除外ルールの条件式ツリーと編集欄](docs/images/readme/05-exclusions.png)
 
 ## 利用条件
 
