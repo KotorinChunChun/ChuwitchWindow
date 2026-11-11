@@ -80,10 +80,10 @@ Stream Deckなどのマクロパッドや自作スクリプトから、実行時
 **実行例:**
 
 ```powershell
-# モニター間を巡回シフトする
-ChuwitchWindow --shift-next
+# ウィンドウを次のモニターへ巡回シフトする
+ChuwitchWindow --rotate-cw
 
-# プライマリとモニター2を入れ替える
+# プライマリモニターとモニター2のウィンドウを入れ替える
 ChuwitchWindow --swap=2
 
 # アクティブなモニターのウィンドウを格子状に整列する
