@@ -83,11 +83,11 @@ Stream Deckなどのマクロパッドや自作スクリプトから、実行時
 **実行例:**
 
 ```powershell
-# モニター間を巡回シフトする
-ChuwitchWindow --shift-next
+# ウィンドウを次のモニターへ巡回シフトする
+ChuwitchWindow --rotate-cw
 
-# モニター1とモニター2を入れ替える
-ChuwitchWindow --swap 1 2
+# プライマリモニターとモニター2のウィンドウを入れ替える
+ChuwitchWindow --swap=2
 ```
 
 ※ アプリが既に常駐している場合、CLIはコマンドだけを送信してすぐに終了します。常駐していない場合は処理を1回だけ実行してすぐに終了します（ワンショット実行）。
