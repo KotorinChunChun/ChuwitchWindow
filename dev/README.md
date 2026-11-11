@@ -1,6 +1,6 @@
 # ChuwitchWindow 開発資料
 
-このフォルダは、開発者本人の計画・判断・版別資料・作業記録を置く。利用者向け情報は [`README.md`](../README.md)、公開開発者向けの手順は [`docs/DEVELOPERS_GUIDE.md`](../docs/DEVELOPERS_GUIDE.md)、必須ルールと資料目録は [`AGENTS.md`](../AGENTS.md) を参照する。
+このフォルダには、開発者本人の計画・判断・版別資料・作業記録を置く。利用者向け情報は [`README.md`](../README.md)、公開開発者向けの手順は [`docs/DEVELOPERS_GUIDE.md`](../docs/DEVELOPERS_GUIDE.md)、必須ルールと資料目録は [`AGENTS.md`](../AGENTS.md) を参照する。
 
 ## 現行版 v0.2.2
 

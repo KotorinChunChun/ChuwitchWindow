@@ -1,6 +1,6 @@
 # README撮影用の隔離画面
 
-通常のデスクトップを動かさず、実フロントエンドを架空の2モニターとSampleViewer.exeで確認するCargo exampleです。設定だけを指定した新規フォルダーへ保存します。通常アプリの起動・ログ初期化・フック・IPC・OS予約・整列・URL起動は実行しません。未登録コマンドは成功を装わずエラーになります。
+このCargo exampleは、実際のフロントエンドを架空の2モニターとSampleViewer.exeで表示します。通常のデスクトップは操作せず、指定した新規フォルダーには設定だけを保存します。通常アプリの起動・ログ初期化・フック・IPC・OS予約・整列・URL起動は実行しません。未登録のコマンドにはエラーを返します。
 
 ```powershell
 cd C:\develop\KotorinToys\tools\ChuwitchWindow
@@ -11,4 +11,4 @@ cargo build --manifest-path src-tauri/Cargo.toml --example manual-preview --feat
 .\src-tauri\target\debug\examples\manual-preview.exe C:\develop\KotorinToys\artifacts\readme-samples\ChuwitchWindow-new
 ```
 
-最後のパスは親フォルダーが存在する、新しい絶対パスを指定します。既存フォルダーを指定すると起動を拒否します。実移動とUndoは `dev/scripts/test-debug-ChuwitchWindow-all.ps1` のMonitorMovement/Arrange試験で専用ウィンドウを使って確認します。撮影用画面の保存結果だけで実モニター操作を確認済みにしません。
+最後の引数には、親フォルダーが存在する未作成のフォルダーを絶対パスで指定します。既存のフォルダーを指定すると起動を拒否します。実際の移動とUndoは `dev/scripts/test-debug-ChuwitchWindow-all.ps1` のMonitorMovement/Arrange試験で専用ウィンドウを使って確認します。撮影用画面で設定を保存した結果だけでは、実モニターの操作を確認したことにはなりません。
