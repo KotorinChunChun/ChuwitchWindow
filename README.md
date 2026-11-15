@@ -174,6 +174,12 @@ ChuwitchWindow --swap=2
 
 ![除外ルールの条件式ツリーと編集欄](docs/images/readme/05-exclusions.png)
 
+## 使用言語とライブラリ
+
+- 使用言語はRust、TypeScriptです。
+- TauriとReact（画面）、global-hotkey（ショートカット）、windows・windows-sys（ウィンドウの操作）、Framer Motion（画面のアニメーション）。
+- 依存定義と資料 [Rustの依存定義](src-tauri/Cargo.toml)・[画面側の依存定義](package.json)
+
 ## 利用条件
 
 - 本ツールはフリーウェアです。無制限にご利用いただけます。
@@ -186,3 +192,7 @@ ChuwitchWindow --swap=2
 **ことりちゅん** ([@KotorinChunChun](https://github.com/KotorinChunChun))
 
 ![](https://avatars.githubusercontent.com/u/55196383?s=400&u=1ae1d910e5b368dac3cf74f0471411ab003f7852&v=4)
+
+## ライセンス
+
+アプリ本体には[MITライセンス](LICENSE)が適用されます。
