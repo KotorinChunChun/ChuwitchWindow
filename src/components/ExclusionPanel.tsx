@@ -8,10 +8,23 @@ import { cn } from "../lib/utils";
 import {
     type RuleNode,
     parseRules,
-    isExcluded,
+    matchNode,
     updateNodeByPath,
     getNodeByPath,
 } from "../lib/ruleUtils";
+
+type FormConditions = Record<string, { enabled: boolean; operator: string; value: string }>;
+
+/** 条件フォームの初期値。新規追加時はプロセス名のみ有効にしておく */
+function createFormConditions(enableProcessName: boolean): FormConditions {
+    return {
+        process_name: { enabled: enableProcessName, operator: "equals", value: "" },
+        class_name: { enabled: false, operator: "equals", value: "" },
+        title: { enabled: false, operator: "contains", value: "" },
+        style: { enabled: false, operator: "equals", value: "" },
+        ex_style: { enabled: false, operator: "equals", value: "" },
+    };
+}
 
 function RuleTreeEditor({ 
   node, 
@@ -166,13 +179,7 @@ export function ExclusionPanel({
     const [formMode, setFormMode] = useState<"ADD" | "EDIT" | "ADD_GROUP">("ADD");
 
     // フォーム入力の状態管理
-    const [formConditions, setFormConditions] = useState<Record<string, {enabled: boolean, operator: string, value: string}>>({
-        process_name: { enabled: true, operator: "equals", value: "" },
-        class_name: { enabled: false, operator: "equals", value: "" },
-        title: { enabled: false, operator: "contains", value: "" },
-        style: { enabled: false, operator: "equals", value: "" },
-        ex_style: { enabled: false, operator: "equals", value: "" },
-    });
+    const [formConditions, setFormConditions] = useState<FormConditions>(() => createFormConditions(true));
 
     const rootNode = parseRules(jsonInput);
 
@@ -302,16 +309,10 @@ export function ExclusionPanel({
         if (node.type === "rule") {
             setFormMode("EDIT");
             // Populate form
-            const newForm = {
-                process_name: { enabled: false, operator: "equals", value: "" },
-                class_name: { enabled: false, operator: "equals", value: "" },
-                title: { enabled: false, operator: "contains", value: "" },
-                style: { enabled: false, operator: "equals", value: "" },
-                ex_style: { enabled: false, operator: "equals", value: "" },
-            };
+            const newForm = createFormConditions(false);
             node.conditions.forEach(cond => {
-                if (newForm[cond.field as keyof typeof newForm]) {
-                    newForm[cond.field as keyof typeof newForm] = {
+                if (newForm[cond.field]) {
+                    newForm[cond.field] = {
                         enabled: true,
                         operator: cond.operator,
                         value: cond.value
@@ -568,13 +569,7 @@ export function ExclusionPanel({
                                 onClick={() => {
                                     setFormMode("ADD");
                                     setSelectedPath([]);
-                                    setFormConditions({
-                                        process_name: { enabled: true, operator: "equals", value: "" },
-                                        class_name: { enabled: false, operator: "equals", value: "" },
-                                        title: { enabled: false, operator: "contains", value: "" },
-                                        style: { enabled: false, operator: "equals", value: "" },
-                                        ex_style: { enabled: false, operator: "equals", value: "" },
-                                    });
+                                    setFormConditions(createFormConditions(true));
                                 }}
                                 className="w-full px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-medium transition-colors text-slate-400 cursor-pointer"
                             >
@@ -612,7 +607,7 @@ export function ExclusionPanel({
                         ) : (
                             <>
                                 {windows.map(w => {
-                                    const excluded = isExcluded(w, jsonInput);
+                                    const excluded = matchNode(w, rootNode);
                                     return (
                                         <div key={w.hwnd} className={cn(
                                             "p-1.5 rounded text-xs flex items-center justify-between border",

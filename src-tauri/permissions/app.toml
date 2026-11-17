@@ -2,14 +2,13 @@
 identifier = "allow-all"
 description = "Allow all commands for ChuwitchWindow"
 commands.allow = [
-    "greet",
     "get_config",
     "save_config",
     "is_user_an_admin",
     "restart_as_admin",
     "sync_admin_startup",
+    "check_autostart_registered_cmd",
     "get_all_monitors_cmd",
-    "trigger_action",
     "check_hotkey_conflict_cmd",
     "set_recording_state_cmd",
     "reset_config_cmd",

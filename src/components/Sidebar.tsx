@@ -11,6 +11,9 @@ const TABS = [
 
 export type TabId = (typeof TABS)[number]["id"];
 
+/** サイドバーの表示順に並んだタブ ID（Ctrl+Tab での切り替え順） */
+export const TAB_IDS: readonly TabId[] = TABS.map((tab) => tab.id);
+
 /**
  * サイドバーコンポーネント
  * アプリ名、ナビゲーションタブ、管理者モード表示を持つ。
