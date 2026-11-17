@@ -1,22 +1,19 @@
 # <img width="32" height="32" alt="image" src="https://github.com/user-attachments/assets/b1280f86-85a9-4fdd-95b4-dade568e92c3" /> ChuwitchWindow - ウィンドウ配置入れ替えツール
 
-本ツールは、マルチモニター環境向けの **ウィンドウ配置入れ替えツール** です。  
-ショートカットキー一発で、開いているウィンドウ群を別のディスプレイへ一斉に移動・交換・巡回できます。
-
-言い換えれば、マルチモニタ環境におけるデスクトップの秩序を維持するためのツールです。
+ChuwitchWindowは、複数のモニターでウィンドウの配置を入れ替えるツールです。ショートカットキーを押すだけで、開いているウィンドウをモニター間でまとめて移動したり、入れ替えたり、順番に移動したりできます。
 
 ## プロジェクト概要
 
-本プロジェクトは、AIと協力して以下の工程で開発を行いました。
+このツールはAIと協力して、以下の工程で開発しました。
 
 1. 開発に至った背景 : [BACK.md](docs/BACK.md)
 2. 仕様書 (v0.1) : [SPECv0.1.md](docs/SPECv0.1.md)
 3. 仕様書 (v0.2) : [SPECv0.2.md](docs/SPECv0.2.md)
 4. AIコーディング : [DEV.md](docs/DEV.md)
 
-本書では、基本的な操作説明のみを行います。
+このREADMEでは基本操作を説明します。
 
-## ✨ 主な機能
+## 主な機能
 
 <img width="2752" alt="ChuwitchWindow概要" src="docs/ChuwitchWindowTop.png" />
 
@@ -34,51 +31,53 @@
 | **除外ウィンドウ設定**【v0.2】     | アプリケーション名等で移動対象から永続的に除外             | —                               |
 | **外部アプリ連携**【v0.2】         | マクロパッド(Stream Deck等)から実行時引数で本アプリを操作  | —                               |
 
-## 🖥️ 対応環境
+## 対応環境
 
 - **OS**: Windows 10 / 11
 - **必要要件**: 特になし（単体 `.exe` で動作）
 
-## 📦 インストール
+## インストール
 
-アプリの一覧へインストールしたくない方／できない方のために、EXEのZIP版とインストール版を用意しています。
+実行ファイルを収めたZIP版とインストール版を用意しています。アプリの一覧に登録したくない場合や登録できない場合は、ZIP版を使えます。
 
-### 軽く試してみたい方
+### ZIP版で試す
 
 1. [Releases](https://github.com/KotorinChunChun/ChuwitchWindow/releases) のAssetsから `*.zip` をダウンロード
 2. `*.zip` を解凍して `ChuwitchWindow.exe` ファイルを直接実行
 
-### 本格的に利用したい方（スタートアップに登録したい方はこちらを推奨）
+### インストール版を使う
+
+スタートアップに登録する場合は、インストール版を推奨します。
 
 1. [Releases](https://github.com/KotorinChunChun/ChuwitchWindow/releases) のAssetsから `*.setup.exe` をダウンロード
 2. `*.setup.exe` を実行してインストール
    - スタートメニューやデスクトップにショートカットが作成されます。
-   - Windowsの【設定】の【アプリ】の【インストールされているアプリ】からアンインストールが可能です。
+   - Windowsの【設定】で【アプリ】を開くと、【インストールされているアプリ】からアンインストールできます。
 
-## 🚀 使い方
+## 使い方
 
 ### 基本操作
 
 1. アプリを起動するとタスクトレイに常駐します
 2. ショートカットキーでウィンドウの入れ替えを実行できます
-3. 設定画面では、ショートカットキーのカスタマイズやモニターグループの設定が行えます
+3. 設定画面でショートカットキーやモニターグループを変更できます
 
 ### 【v0.2】エスケープ（退避）とギャザー（一極集中）の使用例
 
-- **エスケープ（退避）**: オンラインミーティングで特定のモニター（例：モニター2）を画面共有する直前に使用します。モニター2をアクティブにしてショートカットキー（`Win+Ctrl+Alt+E`）を押すと、モニター2にある全ウィンドウが他のモニターへサッと逃げ、クリーンなデスクトップを映すことができます。
-- **ギャザー（一極集中）**: 作業の区切りがついたとき、散らばった全てのウィンドウをとりあえず手元のモニターに集めたい場合に使用します。手元のモニターをアクティブにしてショートカットキー（`Win+Ctrl+Alt+G`）を押すと、全ウィンドウが一箇所に集まります。
+- **エスケープ（退避）**は、オンラインミーティングで特定のモニター（例：モニター2）を共有する直前に使えます。モニター2をアクティブにしてショートカットキー（`Win+Ctrl+Alt+E`）を押すと、モニター2の全ウィンドウがすぐに他のモニターへ移動し、ウィンドウのないデスクトップを共有できます。
+- **ギャザー（一極集中）**は、作業の区切りに、各モニターの全ウィンドウをひとまず手元に集めたいときに使えます。手元のモニターをアクティブにしてショートカットキー（`Win+Ctrl+Alt+G`）を押すと、全ウィンドウがそのモニターに集まります。
 
 ### 【v0.2】除外アプリの登録手順
 
-特定アプリ（OBSやDiscordなど）を移動対象から永続的に外すルールを作る場合、以下のフローが便利です。
+特定のアプリ（OBSやDiscordなど）を移動対象から永続的に外すルールは、次の手順で登録できます。
 
 1. まず、除外したいウィンドウをアクティブにしてショートカットキー（`Win+Ctrl+Alt+P`）を押し、**一時ピン留め**状態にします。
 2. 次に設定画面を開き、「除外リスト」タブを開きます。
-3. すでにピン留めされているウィンドウが提案されるため、そのままルールに追加することで手軽に除外リストへ登録できます。
+3. 候補に表示されたピン留め済みのウィンドウをルールに追加すると、除外リストに登録できます。
 
 ### 【v0.2】CLIからの実行（外部アプリ連携）
 
-Stream Deckなどのマクロパッドや自作スクリプトから、実行時引数をつけて呼び出すことで連携操作が可能です。
+Stream Deckなどのマクロパッドや自作スクリプトから、実行時引数を付けてChuwitchWindowを操作できます。
 事前に設定画面の「設定・常駐」タブの「PATH 環境変数にアプリを追加」で登録しておくと、フルパスを指定せずに実行できます。
 
 | 引数           | 動作                                               |
@@ -95,14 +94,14 @@ Stream Deckなどのマクロパッドや自作スクリプトから、実行時
 **実行例:**
 
 ```powershell
-# モニター間を巡回シフトする
+# ウィンドウを次のモニターへ巡回シフトする
 ChuwitchWindow --rotate-cw
 
 # プライマリモニターとモニター2のウィンドウを入れ替える
 ChuwitchWindow --swap=2
 ```
 
-※ 既にアプリが常駐している場合はコマンドだけを送信して即座に終了し、常駐していない場合は処理を1回だけ実行して即座に終了（ワンショット実行）します。
+※ アプリが既に常駐している場合、CLIはコマンドだけを送信してすぐに終了します。常駐していない場合は処理を1回だけ実行してすぐに終了します（ワンショット実行）。
 
 ### トレイアイコン
 
@@ -113,7 +112,6 @@ ChuwitchWindow --swap=2
 | 右クリック → 再起動 | アプリを再起動 |
 | 右クリック → 終了   | アプリを終了   |
 
-![](https://private-user-images.githubusercontent.com/55196383/553078983-6410993e-9b87-4cf7-861e-b31b97f33570.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzE3NjMzODAsIm5iZiI6MTc3MTc2MzA4MCwicGF0aCI6Ii81NTE5NjM4My81NTMwNzg5ODMtNjQxMDk5M2UtOWI4Ny00Y2Y3LTg2MWUtYjMxYjk3ZjMzNTcwLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMjIlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjIyVDEyMjQ0MFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPThiZTAwNmM3ZGM2M2IzZTUyYzZlYjBkNjM2MjdjZWRmMDI2NzQyN2I0YTQyNWExOWFmN2FhNDM3YThkMjc0NGMmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.xE86VVABk3cmajwNMk26Cd-zJnEVcYJlmEfPCW4y2qI)
 
 ### ウィンドウの動作
 
@@ -124,46 +122,88 @@ ChuwitchWindow --swap=2
 
 設定画面は4つのタブで構成されています。
 
-- **モニター構成**: モニターの物理配置をグラフィカルに表示。クリックでグループ色を変更し、同じ色のモニター間でウィンドウを一斉交換できます。
-- **設定・常駐**: ショートカットキーの変更、スタートアップ登録、最小化ウィンドウの対象外設定【v0.2】、動作設定、設定ファイルのインポート/エクスポート【v0.2】、CLI用Pathの追加登録【v0.2】を行います。
-- **除外リスト**【v0.2】: 「Discord」や「OBS」など、常に移動対象から外すアプリをプロセス名等で条件登録し、一連の動きから除外します。
-- **アプリについて**: バージョン情報、公開場所(GitHub)へのリンク、実行ログの表示があります。
+- **モニター構成**では、モニターの物理的な配置を図で確認できます。モニターをクリックしてグループ色を変更すると、同じ色のモニター間でウィンドウを一斉に交換できます。
+- **設定・常駐**では、ショートカットキーの変更、スタートアップ登録、最小化ウィンドウを移動対象から外す設定【v0.2】、その他の動作設定ができます。設定ファイルのインポート/エクスポート【v0.2】とCLI用Pathの追加登録【v0.2】もここで行います。
+- **除外リスト**【v0.2】では、「Discord」や「OBS」など、常に移動対象から外すアプリの条件をプロセス名などで登録できます。
+- **アプリについて**には、バージョン情報と公開先（GitHub）へのリンク、実行ログがあります。
 
 設定は `%APPDATA%\kotorichun\chuwitchwindow\config\config.json` に自動保存されます。
 
 ### モニタ構成
 
-- プライマリモニターを選択できます。（プライマリモニタは、任意のモニタと交換できるようになります）
-- モニタにグループ色を設定できます。（同じ色のモニター間でウィンドウを一斉交換できるようになります）
-- 順位を設定できます。（巡回シフトの順番を変更できます）
+- プライマリモニターを選ぶと、任意のモニタとウィンドウを交換できます。
+- モニタにグループ色を設定すると、同じ色のモニター間でウィンドウを一斉に交換できます。
+- モニタの順位を設定すると、巡回シフトの順番を変更できます。
 
-![](https://private-user-images.githubusercontent.com/55196383/553030517-cbf31a7a-6e69-4069-9ece-7535cc373c4b.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzE3NjMzODAsIm5iZiI6MTc3MTc2MzA4MCwicGF0aCI6Ii81NTE5NjM4My81NTMwMzA1MTctY2JmMzFhN2EtNmU2OS00MDY5LTllY2UtNzUzNWNjMzczYzRiLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMjIlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjIyVDEyMjQ0MFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPTllODkxMzcyM2JmZjgwNjExZTliMzZiM2VmYmJlM2E2YmFjMGJlYThkYmRjZDFjMTIyMzFjMGRlMmIxZTA1OWImWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.hFUvWM8MP2AJQiPupVOlqtLIn2K970LOSHQ7cL5m-po)
 
 ### 設定・常駐
 
 - 自動起動の登録ができます。
 - ショートカットキーの設定ができます。
-- グループ内での入れ替えを行うかモード切替ができます。
-- フルクリーンアプリの扱いを変更できます。
+- グループ内で入れ替えるかどうかを切り替えられます。
+- フルスクリーンアプリの扱いを変更できます。
 - 【v0.2】最小化されたウィンドウを移動対象から除外するか設定できます。
 
-![](https://private-user-images.githubusercontent.com/55196383/553030503-3193eb73-6f15-4cf4-8a7e-34a94d00571a.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzE3NjMzODAsIm5iZiI6MTc3MTc2MzA4MCwicGF0aCI6Ii81NTE5NjM4My81NTMwMzA1MDMtMzE5M2ViNzMtNmYxNS00Y2Y0LThhN2UtMzRhOTRkMDA1NzFhLnBuZz9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMjIlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjIyVDEyMjQ0MFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWFlMjQ1M2E4NzU0ZjkxMjAwMDE2OGM1ZDMwZDU2NmM1YjBlNWNhZDg2NjZkMTZlMDRiYWNmMGZmYTY5ZDRkMGEmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.c3UaAfmygZkI9oXZvHI-M5OhtbiElO72KS3M3mrNlXA)
 
-### 🛡️ 管理者権限について
+### 管理者権限について
 
 - 通常は一般ユーザー権限で動作しますが、その場合は管理者権限で実行されているアプリを移動させることができません。
 - 管理者権限ウィンドウも操作対象にしたい場合は、設定画面から **「管理者として再起動する」** を実行してください。
 - スタートアップの登録・解除にも管理者権限が必要です。
 
+## 画面で見る使い方
+
+以下は0.2.1の画面です。説明用の2画面構成と隔離設定で撮影しており、実際のウィンドウ移動は行っていません。
+
+### 1. モニターの配置を確認する
+
+「モニター構成」で番号・サイズ・配置を確認します。
+
+![モニター構成の入口。説明用の2画面が並ぶ](docs/images/readme/01-monitors.png)
+
+### 2. 動作とショートカットを設定する
+
+「設定・常駐」で動作を選びます。下の項目はスクロールして確認できます。
+
+![動作設定とショートカットキーの一覧](docs/images/readme/02-settings.png)
+
+### 3. モニターを選んでグループを指定する
+
+図のモニターをクリックすると、順位・プライマリ・グループのボタンが表示されます。
+
+![モニター選択後に表示される設定ボタン](docs/images/readme/03-monitor-options.png)
+
+### 4. 保存されたグループを確認する
+
+この例では「G1」を選ぶと、モニター1が赤くなり、G1と表示されます。設定は自動保存されます。グループ内だけで移動する場合は「設定・常駐」の「グループ内で入れ替えを行う」も有効にします。
+
+![G1の選択がモニターに反映された結果](docs/images/readme/04-group-saved.png)
+
+### 5. 動かしたくないウィンドウを除外する
+
+「除外リスト」でプロセス名やタイトルなどの条件を指定します。条件式ツリー・入力欄・JSON欄が収まらない場合は横方向にもスクロールできます。
+
+![除外ルールの条件式ツリーと編集欄](docs/images/readme/05-exclusions.png)
+
+## 使用言語とライブラリ
+
+- 使用言語はRust、TypeScriptです。
+- TauriとReact（画面）、global-hotkey（ショートカット）、windows・windows-sys（ウィンドウの操作）、Framer Motion（画面のアニメーション）。
+- 依存定義と資料 [Rustの依存定義](src-tauri/Cargo.toml)・[画面側の依存定義](package.json)
+
 ## 利用条件
 
-- 本ツールはフリーウェアです。無制限にご利用頂けます。
+- 本ツールはフリーウェアです。無制限にご利用いただけます。
 - 本ツールを使用したことにより発生したいかなる損害も作者は責任を負いません。
 - Rust未経験者がAIを頼りに書いているため、コード品質については期待しないでください。
-- バグや追加して欲しい機能などがあれば、GitHubのIssuesやTwitterなどでお声掛けください。
+- バグや追加してほしい機能などがあれば、GitHubのIssuesやTwitterなどでお知らせください。
 
-## 👤 作者
+## 作者
 
 **ことりちゅん** ([@KotorinChunChun](https://github.com/KotorinChunChun))
 
 ![](https://avatars.githubusercontent.com/u/55196383?s=400&u=1ae1d910e5b368dac3cf74f0471411ab003f7852&v=4)
+
+## ライセンス
+
+アプリ本体には[MITライセンス](LICENSE)が適用されます。
