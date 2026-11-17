@@ -132,18 +132,13 @@ pub fn hide_arrange_window_cmd(app: AppHandle) {
 pub fn exec_arrange_cmd(arrange_type: String, app: AppHandle) {
     info!("Exec [exec_arrange_cmd]: type_str='{}'", arrange_type);
     
-    let typ = match arrange_type.as_str() {
-        "Grid" => arrange::ArrangeType::Grid,
-        "Vertical" => arrange::ArrangeType::Vertical,
-        "Horizontal" => arrange::ArrangeType::Horizontal,
-        "Cascade" => arrange::ArrangeType::Cascade,
-        _ => {
-            info!("[exec_arrange_cmd] 不明な整列タイプ: {}", arrange_type);
-            arrange::ArrangeType::Grid
-        }
-    };
+    let typ = arrange::ArrangeType::parse(&arrange_type).unwrap_or_else(|| {
+        info!("[exec_arrange_cmd] 不明な整列タイプ: {}", arrange_type);
+        arrange::ArrangeType::Grid
+    });
 
-    arrange::handle_arrange(&app, typ);
+    // ポップアップ表示時に記憶したモニターを対象にする
+    arrange::handle_arrange(&app, typ, arrange::take_target_hmonitor());
     crate::hide_arrange_window(&app);
 }
 

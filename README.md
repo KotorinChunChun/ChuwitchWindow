@@ -90,6 +90,7 @@ Stream Deckなどのマクロパッドや自作スクリプトから、実行時
 | `--pin-toggle` | アクティブなウィンドウのピン留めを切り替え         |
 | `--escape`     | エスケープ（一斉退避）                             |
 | `--gather`     | ギャザー（一極集中）                               |
+| `--arrange=TYPE` | アクティブなモニターを自動整列（`TYPE` は `grid` / `vertical` / `horizontal` / `cascade`） |
 
 **実行例:**
 

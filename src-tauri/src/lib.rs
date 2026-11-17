@@ -6,6 +6,7 @@ pub mod config;
 pub mod history;
 pub mod hotkey;
 pub mod hotplug;
+pub mod layout;
 pub mod logger;
 pub mod logic;
 pub mod monitor;

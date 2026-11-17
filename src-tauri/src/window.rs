@@ -317,6 +317,63 @@ fn map_rect_to_monitor(
     MonitorRect { left: x, top: y, right: x + w, bottom: y + h }
 }
 
+/// ウィンドウの矩形と、DWM の不可視リサイズ枠を除いた「見た目の枠」
+#[derive(Debug, Clone)]
+pub struct WindowFrame {
+    /// GetWindowRect の矩形（SetWindowPos に渡す座標）
+    pub window: MonitorRect,
+    /// 画面上に見えている枠
+    pub visible: MonitorRect,
+}
+
+impl WindowFrame {
+    /// 見た目の枠を `visible` にするための SetWindowPos 用の矩形
+    pub fn to_window_rect(&self, visible: &MonitorRect) -> MonitorRect {
+        MonitorRect {
+            left: visible.left - (self.visible.left - self.window.left),
+            top: visible.top - (self.visible.top - self.window.top),
+            right: visible.right + (self.window.right - self.visible.right),
+            bottom: visible.bottom + (self.window.bottom - self.visible.bottom),
+        }
+    }
+
+    /// 不可視枠の幅の合計（左右, 上下）
+    pub fn margin_size(&self) -> (i32, i32) {
+        (
+            (self.visible.left - self.window.left) + (self.window.right - self.visible.right),
+            (self.visible.top - self.window.top) + (self.window.bottom - self.visible.bottom),
+        )
+    }
+}
+
+/// 不可視枠として妥当な幅の上限。これを超える値が返ってきたら不可視枠は無いものとみなす
+const MAX_INVISIBLE_BORDER: i32 = 32;
+
+pub fn get_window_frame(hwnd: isize) -> WindowFrame {
+    use windows::Win32::Graphics::Dwm::DWMWA_EXTENDED_FRAME_BOUNDS;
+    let mut window = RECT::default();
+    let mut visible = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(HWND(hwnd), &mut window);
+        let res = DwmGetWindowAttribute(
+            HWND(hwnd),
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut visible as *mut _ as *mut _,
+            std::mem::size_of::<RECT>() as u32,
+        );
+        let margins = [
+            visible.left - window.left,
+            visible.top - window.top,
+            window.right - visible.right,
+            window.bottom - visible.bottom,
+        ];
+        if res.is_err() || margins.iter().any(|m| !(0..=MAX_INVISIBLE_BORDER).contains(m)) {
+            visible = window;
+        }
+    }
+    WindowFrame { window: window.into(), visible: visible.into() }
+}
+
 /// ウィンドウを指定の矩形へ移動し、Z オーダーの先頭に置く（アクティブにはしない）
 pub fn set_window_rect(hwnd: isize, rect: &MonitorRect) {
     use windows::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOP, SWP_NOACTIVATE};
@@ -385,6 +442,18 @@ mod tests {
             monitor_area: area,
             is_primary: false,
         }
+    }
+
+    #[test]
+    fn test_frame_to_window_rect_adds_invisible_borders() {
+        // Windows 11 の典型: 左右と下に 7px の不可視枠
+        let frame = WindowFrame {
+            window: MonitorRect { left: 93, top: 100, right: 607, bottom: 507 },
+            visible: MonitorRect { left: 100, top: 100, right: 600, bottom: 500 },
+        };
+        let target = MonitorRect { left: 0, top: 0, right: 960, bottom: 1080 };
+        assert_eq!(frame.to_window_rect(&target), MonitorRect { left: -7, top: 0, right: 967, bottom: 1087 });
+        assert_eq!(frame.margin_size(), (14, 7));
     }
 
     #[test]

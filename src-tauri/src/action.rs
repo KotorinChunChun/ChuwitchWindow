@@ -5,6 +5,8 @@
 
 use tauri::{AppHandle, Emitter};
 
+use crate::arrange::ArrangeType;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     /// 増加方向へシフト
@@ -20,6 +22,8 @@ pub enum Action {
     Gather,
     /// 自動整列ポップアップの表示 (SPEC 2-5)
     Arrange,
+    /// ポップアップを出さずに、アクティブなモニターを指定の方法で整列する（CLI 用）
+    ArrangeWith(ArrangeType),
     /// プライマリモニターと指定番号のモニターを入れ替え
     SwapTarget(u32),
 }
@@ -27,8 +31,12 @@ pub enum Action {
 impl Action {
     /// CLI 引数 1 つを操作に変換する (SPEC 2-4)。アクション以外の引数は `None`。
     ///
-    /// 自動整列はポップアップ操作が前提のため CLI からは受け付けない。
+    /// 自動整列は、ワンショット実行ではポップアップを表示できないため、
+    /// `--arrange=grid` のように整列方法を指定した形だけを受け付ける。
     pub fn from_cli_arg(arg: &str) -> Option<Self> {
+        if let Some(name) = arg.strip_prefix("--arrange=") {
+            return ArrangeType::parse(name).map(Self::ArrangeWith);
+        }
         match arg {
             "--rotate-cw" => Some(Self::RotateCw),
             "--rotate-ccw" => Some(Self::RotateCcw),
@@ -56,6 +64,7 @@ pub fn execute(app: &AppHandle, action: Action) {
         Action::Escape => crate::logic::handle_escape(app),
         Action::Gather => crate::logic::handle_gather(app),
         Action::Arrange => crate::show_arrange_window(app),
+        Action::ArrangeWith(arrange_type) => crate::arrange::handle_arrange(app, arrange_type, None),
         Action::SwapTarget(n) => crate::logic::handle_swap_target(app, n),
     }
 }
@@ -73,6 +82,10 @@ mod tests {
         assert_eq!(Action::from_cli_arg("--escape"), Some(Action::Escape));
         assert_eq!(Action::from_cli_arg("--gather"), Some(Action::Gather));
         assert_eq!(Action::from_cli_arg("--swap=3"), Some(Action::SwapTarget(3)));
+        assert_eq!(Action::from_cli_arg("--arrange=grid"), Some(Action::ArrangeWith(ArrangeType::Grid)));
+        assert_eq!(Action::from_cli_arg("--arrange=Vertical"), Some(Action::ArrangeWith(ArrangeType::Vertical)));
+        assert_eq!(Action::from_cli_arg("--arrange=horizontal"), Some(Action::ArrangeWith(ArrangeType::Horizontal)));
+        assert_eq!(Action::from_cli_arg("--arrange=cascade"), Some(Action::ArrangeWith(ArrangeType::Cascade)));
     }
 
     #[test]
@@ -84,6 +97,8 @@ mod tests {
         // 番号が不正な --swap は無視する
         assert_eq!(Action::from_cli_arg("--swap="), None);
         assert_eq!(Action::from_cli_arg("--swap=x"), None);
+        // ポップアップ表示は CLI からは受け付けない
         assert_eq!(Action::from_cli_arg("--arrange"), None);
+        assert_eq!(Action::from_cli_arg("--arrange=tile"), None);
     }
 }

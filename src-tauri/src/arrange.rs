@@ -1,5 +1,6 @@
+use crate::layout::{compute_layout, Size};
 use crate::monitor::{MonitorInfo, MonitorRect};
-use crate::window::WindowInfo;
+use crate::window::{get_window_frame, WindowFrame, WindowInfo};
 use crate::history::HistoryState;
 use tauri::Manager;
 use tracing::info;
@@ -19,7 +20,12 @@ pub fn set_target_hmonitor(hmonitor: isize) {
     info!("[arrange] 対象モニターを記憶: hmonitor={}", hmonitor);
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+/// ポップアップで記憶した対象モニターを取り出す（取り出したら消す）
+pub fn take_target_hmonitor() -> Option<isize> {
+    last_target_hmonitor_lock().lock().unwrap().take()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ArrangeType {
     Grid,
     Vertical,
@@ -27,44 +33,63 @@ pub enum ArrangeType {
     Cascade,
 }
 
-/// 自動整列を実行する
-pub fn handle_arrange(app: &tauri::AppHandle, arrange_type: ArrangeType) {
+impl ArrangeType {
+    /// 整列方法の名前（"Grid" / "grid" など、大文字小文字は問わない）を解釈する
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.to_ascii_lowercase().as_str() {
+            "grid" => Some(Self::Grid),
+            "vertical" => Some(Self::Vertical),
+            "horizontal" => Some(Self::Horizontal),
+            "cascade" => Some(Self::Cascade),
+            _ => None,
+        }
+    }
+}
+
+/// 実測した最小サイズで配置をやり直す最大回数
+const MAX_RELAYOUT: usize = 2;
+/// 割り当てたサイズより実際のサイズが大きいとみなす誤差（ピクセル）
+const SIZE_TOLERANCE: i32 = 2;
+
+/// 自動整列を実行する。
+/// `target_hmonitor` が `None` なら、フォアグラウンドウィンドウのあるモニターを対象にする。
+pub fn handle_arrange(app: &tauri::AppHandle, arrange_type: ArrangeType, target_hmonitor: Option<isize>) {
     info!("Exec [handle_arrange]: type={:?}", arrange_type);
-    
+
     let monitors = crate::monitor::get_all_monitors();
     if monitors.is_empty() {
         info!("[arrange] モニターが0件のため終了");
         return;
     }
 
-    // ポップアップ表示時に記憶した hmonitor を優先して使う。
+    // ポップアップから実行された場合は、表示時に記憶した hmonitor を使う。
     // 表示後は GetForegroundWindow() が arrange ウィンドウ自身を返してしまうため、
     // その段階で呼ぶと対象モニターの判定が狂う。
-    let stored_hmonitor = *last_target_hmonitor_lock().lock().unwrap();
-    let active_idx = if let Some(hmon) = stored_hmonitor {
-        let idx = monitors.iter().position(|m| m.hmonitor == hmon).unwrap_or(0);
-        info!("[arrange] 記憶済みhmonitor={} → monitors[{}]={} を対象に決定",
-            hmon, idx, monitors[idx].name);
-        idx
-    } else {
-        let idx = crate::monitor::get_active_monitor_index(&monitors).unwrap_or(0);
-        info!("[arrange] 記憶なし: GetForegroundWindow() → monitors[{}]={} を対象に決定",
-            idx, monitors[idx].name);
-        idx
+    let stored_idx = target_hmonitor.and_then(|hmon| monitors.iter().position(|m| m.hmonitor == hmon));
+    let active_idx = match stored_idx {
+        Some(idx) => {
+            info!("[arrange] 記憶済みhmonitor → monitors[{}]={} を対象に決定", idx, monitors[idx].name);
+            idx
+        }
+        None => {
+            let idx = crate::monitor::get_active_monitor_index(&monitors).unwrap_or(0);
+            info!("[arrange] GetForegroundWindow() → monitors[{}]={} を対象に決定", idx, monitors[idx].name);
+            idx
+        }
     };
     let target_monitor = &monitors[active_idx];
     info!("[arrange] 対象モニター: name={} work_area=({},{})–({},{})",
         target_monitor.name,
         target_monitor.work_area.left, target_monitor.work_area.top,
         target_monitor.work_area.right, target_monitor.work_area.bottom);
-    
+
     let config = crate::config::load_config();
     let parsed_rules = crate::rule::parse_rules(&config.exclusion_rules);
 
     // 1. 全ウィンドウを取得
     let all_windows = crate::window::get_target_windows(config.ignore_fullscreen, config.exclude_minimized);
     info!("[arrange] get_target_windows() で取得したウィンドウ数: {}", all_windows.len());
-    
+
     // 2. ターゲットモニター上のウィンドウを「固定（障害物）」と「移動対象」に分ける
     let mut obstacles = Vec::new();
     let mut targets = Vec::new();
@@ -118,97 +143,81 @@ pub fn handle_arrange(app: &tauri::AppHandle, arrange_type: ArrangeType) {
         return;
     }
 
-    // Zオーダーを反転させる (EnumWindows は前面から列挙するため)
-    // これにより、targets[0] が一番背面のウィンドウになり、左上奥に配置されるようになる
-    targets.reverse();
-    info!("[arrange] Zオーダーを反転しました (背面から前面の順)");
-
-    // 3. 障害物を避けた有効な空き領域の計算
-    let mut available_area = target_monitor.work_area.clone();
-    
-    // 単純化のため、障害物が存在する場合は、障害物の境界から
-    // 最も面積が広くなるように available_area を削る簡易アルゴリズム
-    for obs in &obstacles {
-        // 障害物が現在の available_area と交差しているか
-        if intersect(&available_area, &obs.rect) {
-            // 4つの候補（上、下、左、右の空きスペース）を作成して最大のものを選ぶ
-            let mut candidates = Vec::new();
-            
-            // 上側の空きスペース
-            if obs.rect.top > available_area.top {
-                candidates.push(MonitorRect {
-                    left: available_area.left,
-                    right: available_area.right,
-                    top: available_area.top,
-                    bottom: obs.rect.top,
-                });
-            }
-            // 下側の空きスペース
-            if obs.rect.bottom < available_area.bottom {
-                candidates.push(MonitorRect {
-                    left: available_area.left,
-                    right: available_area.right,
-                    top: obs.rect.bottom,
-                    bottom: available_area.bottom,
-                });
-            }
-            // 左側の空きスペース
-            if obs.rect.left > available_area.left {
-                candidates.push(MonitorRect {
-                    left: available_area.left,
-                    right: obs.rect.left,
-                    top: available_area.top,
-                    bottom: available_area.bottom,
-                });
-            }
-            // 右側の空きスペース
-            if obs.rect.right < available_area.right {
-                candidates.push(MonitorRect {
-                    left: obs.rect.right,
-                    right: available_area.right,
-                    top: available_area.top,
-                    bottom: available_area.bottom,
-                });
-            }
-            
-            // 最大面積の候補を新しい available_area とする
-            if let Some(best) = candidates.iter().max_by_key(|r| area(r)) {
-                available_area = best.clone();
-            }
-        }
-    }
-    
-    // 4. 配置計算
-    let new_rects = calculate_layout(&targets, &available_area, arrange_type);
-
-    // 5. 履歴保存と実行
+    // 3. 履歴保存（最大化の解除より前に、操作前の状態を記録する）
     app.state::<HistoryState>().push_windows(&targets);
 
-    for (win, new_rect) in targets.iter().zip(&new_rects) {
-        info!("[arrange]   MOVE hwnd={} \"{}\" ({},{})–({},{}) → ({},{})–({},{})",
-            win.hwnd, win.title,
-            win.rect.left, win.rect.top, win.rect.right, win.rect.bottom,
-            new_rect.left, new_rect.top, new_rect.right, new_rect.bottom);
-        // 最大化したままでは並べた位置に収まらないため、通常表示に戻してから配置する
-        if win.is_maximized {
-            crate::window::restore_window(win.hwnd);
-        }
-        crate::window::set_window_rect(win.hwnd, new_rect);
+    // 最大化したままでは並べた位置に収まらないため、通常表示に戻してから枠の大きさを測る
+    for win in targets.iter().filter(|w| w.is_maximized) {
+        crate::window::restore_window(win.hwnd);
     }
-    info!("[arrange] 完了: {} 件を整列 / モニター={} / 使用エリア=({},{})–({},{})",
-        targets.len(), target_monitor.name,
-        available_area.left, available_area.top,
-        available_area.right, available_area.bottom);
+
+    // 4. 配置計算は「見た目の枠」で行う（Windows 10/11 の不可視のリサイズ枠のぶん隙間が空かないように）
+    let frames: Vec<WindowFrame> = targets.iter().map(|w| get_window_frame(w.hwnd)).collect();
+    let obstacle_rects: Vec<MonitorRect> = obstacles.iter().map(|w| get_window_frame(w.hwnd).visible).collect();
+    let dpi = targets[0].dpi.max(96);
+    let mut mins: Vec<Size> = frames.iter().map(|f| system_min_size(f, dpi)).collect();
+    let cascade_offset = cascade_offset(dpi);
+
+    // 5. 配置。ウィンドウ側の最小サイズに阻まれて割り当てより大きくなったものがあれば、
+    //    実際の大きさを最小サイズとして配置し直す。
+    let mut layout = Vec::new();
+    for attempt in 0..=MAX_RELAYOUT {
+        layout = compute_layout(&target_monitor.work_area, &obstacle_rects, &mins, arrange_type, cascade_offset);
+
+        // targets は前面から順。背面から順に HWND_TOP で置くことで、元の Z オーダーを保つ
+        for (i, win) in targets.iter().enumerate().rev() {
+            let visible = &layout[i];
+            info!("[arrange]   MOVE hwnd={} \"{}\" → ({},{})–({},{})",
+                win.hwnd, win.title, visible.left, visible.top, visible.right, visible.bottom);
+            crate::window::set_window_rect(win.hwnd, &frames[i].to_window_rect(visible));
+        }
+
+        let mut changed = false;
+        for (i, win) in targets.iter().enumerate() {
+            let actual = get_window_frame(win.hwnd).visible;
+            let (actual_w, actual_h) = (actual.right - actual.left, actual.bottom - actual.top);
+            let (planned_w, planned_h) = (layout[i].right - layout[i].left, layout[i].bottom - layout[i].top);
+            if actual_w > planned_w + SIZE_TOLERANCE && actual_w > mins[i].w {
+                mins[i].w = actual_w;
+                changed = true;
+            }
+            if actual_h > planned_h + SIZE_TOLERANCE && actual_h > mins[i].h {
+                mins[i].h = actual_h;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+        info!("[arrange] 最小サイズに阻まれたウィンドウがあるため配置し直す (attempt={})", attempt + 1);
+    }
+
+    info!("[arrange] 完了: {} 件を整列 / モニター={} / 固定ウィンドウ={} 件 / 配置={:?}",
+        targets.len(), target_monitor.name, obstacle_rects.len(), layout);
 }
 
-fn intersect(r1: &MonitorRect, r2: &MonitorRect) -> bool {
-    r1.left < r2.right && r1.right > r2.left && r1.top < r2.bottom && r1.bottom > r2.top
+/// システムが許すウィンドウの最小サイズ（見た目の枠の大きさに換算）。
+/// アプリ独自の最小サイズは、実際に配置してから測って反映する。
+fn system_min_size(frame: &WindowFrame, dpi: u32) -> Size {
+    use windows::Win32::UI::HiDpi::GetSystemMetricsForDpi;
+    use windows::Win32::UI::WindowsAndMessaging::{SM_CXMINTRACK, SM_CYMINTRACK};
+    let (min_w, min_h) = unsafe {
+        (GetSystemMetricsForDpi(SM_CXMINTRACK, dpi), GetSystemMetricsForDpi(SM_CYMINTRACK, dpi))
+    };
+    let (margin_w, margin_h) = frame.margin_size();
+    Size { w: (min_w - margin_w).max(0), h: (min_h - margin_h).max(0) }
 }
 
-fn area(r: &MonitorRect) -> i32 {
-    let w = (r.right - r.left).max(0);
-    let h = (r.bottom - r.top).max(0);
-    w * h
+/// 重ねて表示でずらす量。タイトルバーがちょうど見える高さにする。
+fn cascade_offset(dpi: u32) -> i32 {
+    use windows::Win32::UI::HiDpi::GetSystemMetricsForDpi;
+    use windows::Win32::UI::WindowsAndMessaging::{SM_CXPADDEDBORDER, SM_CYCAPTION, SM_CYSIZEFRAME};
+    let offset = unsafe {
+        GetSystemMetricsForDpi(SM_CYCAPTION, dpi)
+            + GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi)
+            + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi)
+    };
+    if offset > 0 { offset } else { 30 }
 }
 
 fn is_window_on_monitor(win: &WindowInfo, monitor: &MonitorInfo) -> bool {
@@ -216,7 +225,7 @@ fn is_window_on_monitor(win: &WindowInfo, monitor: &MonitorInfo) -> bool {
     let intersect_right = win.rect.right.min(monitor.monitor_area.right);
     let intersect_top = win.rect.top.max(monitor.monitor_area.top);
     let intersect_bottom = win.rect.bottom.min(monitor.monitor_area.bottom);
-    
+
     if intersect_right > intersect_left && intersect_bottom > intersect_top {
         let area = (intersect_right - intersect_left) * (intersect_bottom - intersect_top);
         let win_area = (win.rect.right - win.rect.left) * (win.rect.bottom - win.rect.top);
@@ -225,74 +234,6 @@ fn is_window_on_monitor(win: &WindowInfo, monitor: &MonitorInfo) -> bool {
         return area * 2 >= win_area;
     }
     false
-}
-
-
-fn calculate_layout(targets: &[WindowInfo], area: &MonitorRect, arrange_type: ArrangeType) -> Vec<MonitorRect> {
-    let n = targets.len();
-    let mut rects = Vec::with_capacity(n);
-    let width = area.right - area.left;
-    let height = area.bottom - area.top;
-
-    match arrange_type {
-        ArrangeType::Grid => {
-            let cols = (n as f64).sqrt().ceil() as i32;
-            let rows = (n as f64 / cols as f64).ceil() as i32;
-            let cell_w = width / cols;
-            let cell_h = height / rows;
-
-            for i in 0..n {
-                let r = i as i32 / cols;
-                let c = i as i32 % cols;
-                rects.push(MonitorRect {
-                    left: area.left + c * cell_w,
-                    top: area.top + r * cell_h,
-                    right: area.left + (c + 1) * cell_w,
-                    bottom: area.top + (r + 1) * cell_h,
-                });
-            }
-        }
-        ArrangeType::Vertical => {
-            let cell_h = height / n as i32;
-            for i in 0..n {
-                rects.push(MonitorRect {
-                    left: area.left,
-                    top: area.top + i as i32 * cell_h,
-                    right: area.right,
-                    bottom: area.top + (i as i32 + 1) * cell_h,
-                });
-            }
-        }
-        ArrangeType::Horizontal => {
-            let cell_w = width / n as i32;
-            for i in 0..n {
-                rects.push(MonitorRect {
-                    left: area.left + i as i32 * cell_w,
-                    top: area.top,
-                    right: area.left + (i as i32 + 1) * cell_w,
-                    bottom: area.bottom,
-                });
-            }
-        }
-        ArrangeType::Cascade => {
-            let offset = 30; // 階段状のずらし幅
-            // 元のサイズの70%程度にする
-            let win_w = (width as f64 * 0.7) as i32;
-            let win_h = (height as f64 * 0.7) as i32;
-
-            for i in 0..n {
-                let x = area.left + (i as i32 * offset);
-                let y = area.top + (i as i32 * offset);
-                rects.push(MonitorRect {
-                    left: x,
-                    top: y,
-                    right: x + win_w,
-                    bottom: y + win_h,
-                });
-            }
-        }
-    }
-    rects
 }
 
 #[cfg(test)]
@@ -338,66 +279,15 @@ mod tests {
     }
 
     // ---------------------------------------------------------
-    // area() のテスト
+    // ArrangeType::parse() のテスト
     // ---------------------------------------------------------
     #[test]
-    fn test_area_normal() {
-        let r = rect(0, 0, 100, 200);
-        assert_eq!(area(&r), 20000);
-    }
-
-    #[test]
-    fn test_area_zero_width() {
-        let r = rect(50, 0, 50, 100);
-        assert_eq!(area(&r), 0);
-    }
-
-    #[test]
-    fn test_area_negative_size() {
-        // right < left の場合は 0
-        let r = rect(100, 0, 50, 100);
-        assert_eq!(area(&r), 0);
-    }
-
-    // ---------------------------------------------------------
-    // intersect() のテスト
-    // ---------------------------------------------------------
-    #[test]
-    fn test_intersect_overlap() {
-        let r1 = rect(0, 0, 100, 100);
-        let r2 = rect(50, 50, 150, 150);
-        assert!(intersect(&r1, &r2));
-    }
-
-    #[test]
-    fn test_intersect_no_overlap_horizontal() {
-        // 右端と左端がぴったり接するだけ → 交差なし
-        let r1 = rect(0, 0, 100, 100);
-        let r2 = rect(100, 0, 200, 100);
-        assert!(!intersect(&r1, &r2));
-    }
-
-    #[test]
-    fn test_intersect_no_overlap_vertical() {
-        // 下端と上端がぴったり接するだけ → 交差なし
-        let r1 = rect(0, 0, 100, 100);
-        let r2 = rect(0, 100, 100, 200);
-        assert!(!intersect(&r1, &r2));
-    }
-
-    #[test]
-    fn test_intersect_contained() {
-        // r2 が r1 に完全に含まれる場合
-        let r1 = rect(0, 0, 200, 200);
-        let r2 = rect(50, 50, 150, 150);
-        assert!(intersect(&r1, &r2));
-    }
-
-    #[test]
-    fn test_intersect_far_apart() {
-        let r1 = rect(0, 0, 100, 100);
-        let r2 = rect(500, 500, 600, 600);
-        assert!(!intersect(&r1, &r2));
+    fn test_parse_arrange_type() {
+        assert_eq!(ArrangeType::parse("Grid"), Some(ArrangeType::Grid));
+        assert_eq!(ArrangeType::parse("vertical"), Some(ArrangeType::Vertical));
+        assert_eq!(ArrangeType::parse("HORIZONTAL"), Some(ArrangeType::Horizontal));
+        assert_eq!(ArrangeType::parse("cascade"), Some(ArrangeType::Cascade));
+        assert_eq!(ArrangeType::parse("tile"), None);
     }
 
     // ---------------------------------------------------------
@@ -425,92 +315,5 @@ mod tests {
         let monitor = mock_monitor(0, 0, 1920, 1080);
         let win = mock_window(-1000, 0, 200, 1080);
         assert!(!is_window_on_monitor(&win, &monitor));
-    }
-
-    // ---------------------------------------------------------
-    // calculate_layout() のテスト
-    // ---------------------------------------------------------
-    fn make_windows(n: usize) -> Vec<WindowInfo> {
-        (0..n).map(|_| mock_window(0, 0, 400, 300)).collect()
-    }
-
-    #[test]
-    fn test_layout_vertical_2() {
-        let area = rect(0, 0, 1920, 1080);
-        let wins = make_windows(2);
-        let rects = calculate_layout(&wins, &area, ArrangeType::Vertical);
-        assert_eq!(rects.len(), 2);
-        // 上半分
-        assert_eq!(rects[0].top, 0);
-        assert_eq!(rects[0].bottom, 540);
-        // 下半分
-        assert_eq!(rects[1].top, 540);
-        assert_eq!(rects[1].bottom, 1080);
-        // 左右はフル幅
-        assert_eq!(rects[0].left, 0);
-        assert_eq!(rects[0].right, 1920);
-    }
-
-    #[test]
-    fn test_layout_horizontal_3() {
-        let area = rect(0, 0, 1920, 1080);
-        let wins = make_windows(3);
-        let rects = calculate_layout(&wins, &area, ArrangeType::Horizontal);
-        assert_eq!(rects.len(), 3);
-        let cell_w = 1920 / 3;
-        assert_eq!(rects[0].left, 0);
-        assert_eq!(rects[0].right, cell_w);
-        assert_eq!(rects[1].left, cell_w);
-        assert_eq!(rects[2].right, 1920);
-        // 上下はフル高さ
-        for r in &rects {
-            assert_eq!(r.top, 0);
-            assert_eq!(r.bottom, 1080);
-        }
-    }
-
-    #[test]
-    fn test_layout_grid_4() {
-        let area = rect(0, 0, 1920, 1080);
-        let wins = make_windows(4);
-        let rects = calculate_layout(&wins, &area, ArrangeType::Grid);
-        assert_eq!(rects.len(), 4);
-        // 4 枚 → 2×2 グリッド
-        let cols = 2_i32;
-        let cell_w = 1920 / cols;
-        let cell_h = 1080 / cols;
-        // 左上
-        assert_eq!(rects[0], rect(0, 0, cell_w, cell_h));
-        // 右上
-        assert_eq!(rects[1].left, cell_w);
-        assert_eq!(rects[1].top, 0);
-        // 左下
-        assert_eq!(rects[2].left, 0);
-        assert_eq!(rects[2].top, cell_h);
-    }
-
-    #[test]
-    fn test_layout_cascade_offsets() {
-        let area = rect(0, 0, 1920, 1080);
-        let wins = make_windows(3);
-        let rects = calculate_layout(&wins, &area, ArrangeType::Cascade);
-        assert_eq!(rects.len(), 3);
-        let offset = 30;
-        // 各ウィンドウは前より offset ずつ右下にずれる
-        assert_eq!(rects[0].left, 0);
-        assert_eq!(rects[0].top, 0);
-        assert_eq!(rects[1].left, offset);
-        assert_eq!(rects[1].top, offset);
-        assert_eq!(rects[2].left, offset * 2);
-        assert_eq!(rects[2].top, offset * 2);
-    }
-
-    #[test]
-    fn test_layout_single_window_grid_fills_area() {
-        let area = rect(100, 200, 1820, 880);
-        let wins = make_windows(1);
-        let rects = calculate_layout(&wins, &area, ArrangeType::Grid);
-        assert_eq!(rects.len(), 1);
-        assert_eq!(rects[0], rect(100, 200, 1820, 880));
     }
 }
